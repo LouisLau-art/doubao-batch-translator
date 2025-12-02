@@ -1,0 +1,53 @@
+{
+  "name": "doubao-translator",
+  "version": "1.0.0",
+  "description": "Batch translate HTML/Markdown files using Doubao API",
+  "main": "dist/index.js",
+  "bin": {
+    "doubao-translator": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/cli.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "translation",
+    "doubao",
+    "HTML",
+    "Markdown",
+    "batch"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "iconv-lite": "^0.6.3",
+    "jsdom": "^25.0.1",
+    "marked": "^14.1.2",
+    "nodejieba": "^2.6.0",
+    "tiktoken": "^1.0.12"
+  },
+  "devDependencies": {
+    "@types/commander": "^2.12.2",
+    "@types/dotenv": "^8.2.0",
+    "@types/iconv-lite": "latest",
+    "@types/jest": "latest",
+    "@types/jsdom": "^21.1.7",
+    "@types/marked": "^5.0.2",
+    "@types/node": "latest",
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
