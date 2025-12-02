@@ -141,19 +141,30 @@ Test with the provided sample files in `examples/` directory:
 - `examples/sample.html` - HTML file with various text elements
 - `examples/sample.md` - Markdown file with headers, lists, and code blocks
 
-## 🔮 Next Steps
+## 🗓️ Project Roadmap
+### Phase 4: Testing & Documentation (1-2 weeks)
+- [ ] Write unit tests (HTML/Markdown processors, LLM client, file scanner)
+- [ ] Write integration tests (full translation workflow)
+- [ ] Create performance benchmarks
+- [ ] Improve user and API documentation
 
-### Phase 4: Testing & Documentation (In Progress)
-- [x] Create comprehensive documentation
-- [ ] Write unit tests for core components
-- [ ] Add integration tests for full workflow
-- [ ] Create example configurations
+### Phase 5: Performance Optimization (2-3 weeks)
+- [ ] Analyze performance bottlenecks in large batch processing
+- [ ] Implement parallel file processing
+- [ ] Optimize caching strategy and memory usage
+- [ ] Add request rate limiting and error retry mechanisms
 
-### Phase 5: Performance Optimization
-- [ ] Analyze performance bottlenecks
-- [ ] Implement parallel processing
-- [ ] Add caching optimizations
-- [ ] Create CI/CD pipeline
+### Phase 6: Production Readiness (1-2 weeks)
+- [ ] Create Docker container deployment
+- [ ] Set up GitHub Actions CI/CD pipeline
+- [ ] Add health checks and monitoring
+- [ ] Write deployment and operation documentation
+
+### Phase 7: Feature Expansion (Future)
+- [ ] Support more file formats (PDF, Word, Excel)
+- [ ] Add support for more translation service providers
+- [ ] Implement incremental translation and difference detection
+- [ ] Develop web interface and API service
 
 ## 🤝 Contributing
 
