@@ -1,0 +1,92 @@
+[
+  {
+    "id": "start_1a2b3c",
+    "file": "game/script.rpy",
+    "line": 20,
+    "type": "dialogue",
+    "original": "Hello, world! This is my first dialogue.",
+    "translated": null,
+    "context": "eileen happy"
+  },
+  {
+    "id": "start_4d5e6f",
+    "file": "game/script.rpy", 
+    "line": 21,
+    "type": "dialogue",
+    "original": "Welcome to our adventure game.",
+    "translated": null,
+    "context": "eileen neutral"
+  },
+  {
+    "id": "start_7g8h9i",
+    "file": "game/script.rpy",
+    "line": 22,
+    "type": "string", 
+    "original": "You found a mysterious treasure chest.",
+    "translated": "你发现了一个神秘的宝箱。",
+    "context": "gameplay event"
+  },
+  {
+    "id": "start_0j1k2l",
+    "file": "game/script.rpy",
+    "line": 23,
+    "type": "dialogue",
+    "original": "What would you like to do?",
+    "translated": null,
+    "context": "player choice"
+  },
+  {
+    "id": "start_3m4n5o",
+    "file": "game/script.rpy",
+    "line": 24,
+    "type": "dialogue",
+    "original": "The journey ahead looks dangerous.",
+    "translated": null,
+    "context": "story narration"
+  },
+  {
+    "id": "start_6p7q8r",
+    "file": "game/menu.rpy",
+    "line": 15,
+    "type": "string",
+    "original": "Save Game",
+    "translated": "保存游戏",
+    "context": "ui element"
+  },
+  {
+    "id": "start_9s0t1u",
+    "file": "game/menu.rpy",
+    "line": 16,
+    "type": "string",
+    "original": "Load Game", 
+    "translated": null,
+    "context": "ui element"
+  },
+  {
+    "id": "start_2v3w4x",
+    "file": "game/menu.rpy",
+    "line": 17,
+    "type": "string",
+    "original": "Settings",
+    "translated": null,
+    "context": "ui element"
+  },
+  {
+    "id": "start_5y6z7a",
+    "file": "game/script.rpy",
+    "line": 25,
+    "type": "dialogue",
+    "original": "Your health is running low.",
+    "translated": null,
+    "context": "gameplay warning"
+  },
+  {
+    "id": "start_8b9c0d",
+    "file": "game/script.rpy",
+    "line": 26,
+    "type": "dialogue", 
+    "original": "Would you like to use a health potion?",
+    "translated": null,
+    "context": "gameplay interaction"
+  }
+]
