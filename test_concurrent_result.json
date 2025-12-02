@@ -1,0 +1,52 @@
+[
+  {
+    "original": "Hello world! This is a test message.",
+    "translated": "您好！这里是一条测试消息。",
+    "id": "1",
+    "file": "test.rpy",
+    "line": 10,
+    "type": "dialogue",
+    "context": "Main character greeting",
+    "translated_at": "2025-12-02T22:55:34.511108"
+  },
+  {
+    "original": "How are you today?",
+    "translated": "你今天过得怎么样？",
+    "id": "2",
+    "file": "test.rpy",
+    "line": 11,
+    "type": "dialogue",
+    "context": "Character asking about wellbeing",
+    "translated_at": "2025-12-02T22:55:34.490663"
+  },
+  {
+    "original": "I'm fine, thank you!",
+    "translated": "我很好，谢谢你！",
+    "id": "3",
+    "file": "test.rpy",
+    "line": 12,
+    "type": "dialogue",
+    "context": "Positive response",
+    "translated_at": "2025-12-02T22:55:34.490567"
+  },
+  {
+    "original": "That's great to hear!",
+    "translated": "听到这个消息真是太好了！",
+    "id": "4",
+    "file": "test.rpy",
+    "line": 13,
+    "type": "dialogue",
+    "context": "Expressing happiness",
+    "translated_at": "2025-12-02T22:55:34.492915"
+  },
+  {
+    "original": "What's your plan for today?",
+    "translated": "你今天有什么计划吗？",
+    "id": "5",
+    "file": "test.rpy",
+    "line": 14,
+    "type": "dialogue",
+    "context": "Planning discussion",
+    "translated_at": "2025-12-02T22:55:34.490421"
+  }
+]

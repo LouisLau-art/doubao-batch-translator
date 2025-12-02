@@ -250,49 +250,65 @@ class AsyncTranslator:
     def _parse_response(self, response: Dict, batch: List[Dict]) -> List[Dict]:
         """解析API响应"""
         try:
-            choices = response.get("choices", [])
-            if not choices:
-                raise APIError("API响应中没有choices字段")
+            # 豆包API响应格式处理
+            if "choices" in response:
+                # OpenAI格式
+                choices = response.get("choices", [])
+                if not choices:
+                    raise APIError("API响应中没有choices字段")
+                message_content = choices[0].get("message", {}).get("content", "{}")
+            elif "output" in response:
+                # 豆包API格式
+                output_list = response["output"]
+                if not output_list or not isinstance(output_list, list):
+                    raise APIError("API响应中output字段格式错误")
+                first_output = output_list[0]
+                content_list = first_output.get("content", [])
+                if not content_list or not isinstance(content_list, list):
+                    raise APIError("API响应中content字段格式错误")
+                message_content = content_list[0].get("text", "")
+            else:
+                # 直接使用响应内容
+                message_content = str(response)
             
-            # 获取消息内容
-            message_content = choices[0].get("message", {}).get("content", "{}")
+            # 直接返回翻译文本内容
+            if isinstance(message_content, str):
+                translated_text = message_content.strip()
+            else:
+                # 尝试解析JSON（备用）
+                try:
+                    content_data = json.loads(message_content)
+                    translated_text = content_data.get("translation", str(message_content))
+                except (json.JSONDecodeError, TypeError):
+                    translated_text = str(message_content)
             
-            # 尝试解析JSON
-            try:
-                content_data = json.loads(message_content)
-            except json.JSONDecodeError as e:
-                raise APIError(f"无法解析API响应JSON: {e}")
-            
-            # 提取翻译结果
-            translations = content_data.get("translations", [])
-            if len(translations) != len(batch):
-                logger.warning(
-                    f"翻译结果数量不匹配: 期望 {len(batch)}, 实际 {len(translations)}"
-                )
-                # 填充缺失的翻译结果
-                while len(translations) < len(batch):
-                    translations.append("")
-            
-            # 构建结果
-            results = []
-            for i, item in enumerate(batch):
-                translated_text = translations[i] if i < len(translations) else ""
-                
-                result = {
-                    "original": item["text"],
+            # 返回单个项目的翻译结果
+            if len(batch) == 1:
+                return [{
+                    "original": batch[0]["text"],
                     "translated": translated_text,
-                    "index": item.get("index", i),
+                    "index": batch[0].get("index", 0),
                     "translated_at": datetime.now().isoformat()
-                }
+                }]
+            else:
+                # 批处理模式（备用）
+                results = []
+                for i, item in enumerate(batch):
+                    result = {
+                        "original": item["text"],
+                        "translated": translated_text if i == 0 else "",
+                        "index": item.get("index", i),
+                        "translated_at": datetime.now().isoformat()
+                    }
+                    
+                    # 保留原始项目的其他字段
+                    for key, value in item.items():
+                        if key not in ["text", "index"] and key not in result:
+                            result[key] = value
+                    
+                    results.append(result)
                 
-                # 保留原始项目的其他字段
-                for key, value in item.items():
-                    if key not in ["text", "index"] and key not in result:
-                        result[key] = value
-                
-                results.append(result)
-            
-            return results
+                return results
         
         except Exception as e:
             logger.error(f"解析API响应失败: {e}")

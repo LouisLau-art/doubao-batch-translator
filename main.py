@@ -11,7 +11,8 @@ import sys
 from typing import Optional
 
 from core import TranslatorConfig, AsyncTranslator
-from processors import JSONProcessor, HTMLProcessor
+from processors.json_worker import JSONProcessor
+from processors import HTMLProcessor
 from server import DoubaoServer, run_server
 
 
@@ -142,29 +143,28 @@ class MainCLI:
             # 获取配置
             config = self._get_config(args)
             
-            # 创建翻译器和处理器
-            async with AsyncTranslator(config) as translator:
-                processor = JSONProcessor(translator)
-                
-                # 执行翻译
-                result = await processor.translate_file(
-                    input_file=args.file,
-                    output_file=args.output,
-                    source_lang=args.source_lang,
-                    target_lang=args.target_lang
-                )
-                
-                # 输出结果
-                print(f"翻译完成!")
-                print(f"总计: {result['total']} 条目")
-                print(f"已完成: {result['translated']} 条目")
-                print(f"进度: {result['progress']}%")
-                
-                if result.get('success'):
-                    logger.info(f"结果已保存到: {result.get('output_file', args.output or args.file)}")
-                else:
-                    logger.error("翻译过程中遇到错误")
-                    sys.exit(1)
+            # 创建处理器
+            processor = JSONProcessor(config)
+            
+            # 执行翻译
+            result = await processor.translate_file(
+                input_file=args.file,
+                output_file=args.output,
+                source_lang=args.source_lang,
+                target_lang=args.target_lang
+            )
+            
+            # 输出结果
+            print(f"翻译完成!")
+            print(f"总计: {result['total']} 条目")
+            print(f"已完成: {result['translated']} 条目")
+            print(f"进度: {result['progress']}%")
+            
+            if result.get('success'):
+                logger.info(f"结果已保存到: {result.get('output_file', args.output or args.file)}")
+            else:
+                logger.error("翻译过程中遇到错误")
+                sys.exit(1)
                     
         except Exception as e:
             logger.error(f"JSON翻译失败: {e}")

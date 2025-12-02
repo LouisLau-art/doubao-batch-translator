@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-JSON处理器 - RenPy翻译专用
-专门处理包含翻译数据的JSON文件，支持断点续传和进度保存
+JSON处理器 - 高并发单请求翻译
+专门适配 doubao-seed-translation-250915 模型，该模型不支持批量请求
 """
 
 import json
 import os
+import asyncio
 import logging
 import shutil
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+from typing import List, Dict, Any, Optional
+from tqdm.asyncio import tqdm
 
-from core import AsyncTranslator, TranslatorConfig, ValidationError
+from core.client import AsyncDoubaoClient
 from core.exceptions import FileProcessingError
 
 
@@ -20,91 +22,52 @@ logger = logging.getLogger(__name__)
 
 
 class JSONProcessor:
-    """JSON文件翻译处理器（RenPy翻译专用）"""
+    """JSON文件翻译处理器（高并发单请求版本）"""
     
-    def __init__(self, translator: AsyncTranslator):
+    def __init__(self, api_key: str):
         """初始化JSON处理器
         
         Args:
-            translator: 异步翻译器实例
+            api_key: API密钥
         """
-        self.translator = translator
+        self.api_key = api_key
+        self.client = AsyncDoubaoClient(api_key)
         
-        # 支持的字段配置
-        self.supported_fields = {
-            'id': '翻译条目ID',
-            'file': '源文件路径',
-            'line': '文件行号',
-            'type': '文本类型',
-            'original': '原始文本',
-            'translated': '翻译文本',
-            'context': '上下文信息',
-            'translated_at': '翻译时间'
-        }
-    
-    def _validate_json_structure(self, data: Any) -> List[Dict]:
-        """验证JSON数据结构
+        # 保存配置
+        self.SAVE_INTERVAL = 50  # 每50个项目保存一次进度
+        self.processed_count = 0
+        
+    def _format_json_output(self, data: List[Dict]) -> List[Dict]:
+        """格式化JSON输出，按照指定键顺序
         
         Args:
-            data: JSON数据
+            data: 要格式化的数据列表
             
         Returns:
-            验证后的条目列表
-            
-        Raises:
-            ValidationError: 数据结构验证失败
+            格式化后的数据列表
         """
-        if not isinstance(data, list):
-            raise ValidationError("JSON数据必须是数组格式")
+        formatted_data = []
+        for item in data:
+            # 创建新字典，按照指定顺序插入键
+            formatted_item = {
+                'original': item.get('original', ''),
+                'translated': item.get('translated'),
+                'id': item.get('id', ''),
+                'file': item.get('file', ''),
+                'line': item.get('line', 0),
+                'type': item.get('type', 'text'),
+                'context': item.get('context', ''),
+                'translated_at': item.get('translated_at')
+            }
+            
+            # 添加其他可能的字段
+            for key, value in item.items():
+                if key not in formatted_item:
+                    formatted_item[key] = value
+            
+            formatted_data.append(formatted_item)
         
-        if not data:
-            raise ValidationError("JSON数组不能为空")
-        
-        validated_items = []
-        
-        for i, item in enumerate(data):
-            try:
-                if not isinstance(item, dict):
-                    raise ValidationError(f"项目 {i} 不是字典类型")
-                
-                # 验证必需字段
-                required_fields = ['original']
-                missing_fields = [field for field in required_fields if field not in item]
-                if missing_fields:
-                    raise ValidationError(f"项目 {i} 缺少必需字段: {missing_fields}")
-                
-                # 清理和标准化数据
-                cleaned_item = {
-                    'original': str(item['original']).strip(),
-                    'translated': None,
-                    'id': item.get('id', f"item_{i}"),
-                    'file': item.get('file', ''),
-                    'line': item.get('line', 0),
-                    'type': item.get('type', 'text'),
-                    'context': item.get('context', ''),
-                    'translated_at': item.get('translated_at')
-                }
-                
-                # 如果已有翻译，保留
-                if item.get('translated') is not None:
-                    cleaned_item['translated'] = str(item['translated']).strip()
-                
-                # 过滤空文本
-                if not cleaned_item['original']:
-                    logger.warning(f"跳过项目 {i}：原始文本为空")
-                    continue
-                
-                validated_items.append(cleaned_item)
-                
-            except Exception as e:
-                logger.warning(f"验证项目 {i} 失败: {e}")
-                continue
-        
-        if not validated_items:
-            raise ValidationError("没有有效的翻译条目")
-        
-        logger.info(f"验证了 {len(validated_items)} 个有效条目")
-        return validated_items
+        return formatted_data
     
     def _create_backup(self, file_path: str) -> str:
         """创建文件备份
@@ -118,7 +81,7 @@ class JSONProcessor:
         if not os.path.exists(file_path):
             return None
         
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S")
         backup_path = f"{file_path}.backup.{timestamp}"
         
         try:
@@ -142,12 +105,15 @@ class JSONProcessor:
         """
         try:
             # 创建备份（如果文件存在且没有指定备份路径）
-            if not backup_path:
-                backup_path = self._create_backup(file_path)
+        if not backup_path and os.path.exists(file_path):
+            backup_path = self._create_backup(file_path)
+            
+            # 格式化输出
+            formatted_data = self._format_json_output(data)
             
             # 保存数据
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(formatted_data, f, ensure_ascii=False, indent=2)
             
             logger.info(f"进度已保存到: {file_path}")
             return True
@@ -156,8 +122,8 @@ class JSONProcessor:
             logger.error(f"保存进度失败: {e}")
             return False
     
-    def _filter_untranslated_items(self, data: List[Dict]) -> List[Dict]:
-        """过滤出未翻译的条目
+    def _get_untranslated_items(self, data: List[Dict]) -> List[Dict]:
+        """获取未翻译的条目
         
         Args:
             data: 数据列表
@@ -168,12 +134,47 @@ class JSONProcessor:
         untranslated = []
         
         for item in data:
-            # 检查是否需要翻译
             translated = item.get('translated')
             if translated is None or translated == "":
-                untranslated.append(item)
+            untranslated.append(item)
         
         return untranslated
+    
+    async def _translate_single_item(self, item: Dict, source_lang: str, target_lang: str) -> Dict:
+        """翻译单个条目（就地更新）
+        
+        Args:
+            item: 要翻译的条目
+            source_lang: 源语言代码
+            target_lang: 目标语言代码
+            
+        Returns:
+            更新后的条目
+        """
+        try:
+            original_text = item['original']
+            
+            logger.debug(f"翻译: {original_text[:50]}...")
+            
+            # 调用API进行翻译
+            translation = await self.client.async_translate(
+                original_text, source_lang, target_lang)
+            
+            if translation:
+                logger.debug(f"翻译结果: {translation[:50]}...")
+                # 就地更新条目
+                item['translated'] = translation
+                item['translated_at'] = datetime.now().isoformat()
+            else:
+                logger.warning(f"API调用返回空结果: {original_text[:50]}...")
+                item['translated'] = None
+            
+            return item
+            
+        except Exception as e:
+            logger.error(f"翻译条目失败 (ID: {item.get('id', 'unknown')}): {e}")
+            item['translation_error'] = str(e)
+            return item
     
     def _get_translation_stats(self, data: List[Dict]) -> Dict[str, int]:
         """获取翻译统计信息
@@ -185,43 +186,33 @@ class JSONProcessor:
             统计信息字典
         """
         total = len(data)
-        translated = sum(1 for item in data if item.get('translated'))
-        untranslated = total - translated
+        translated = sum(1 for item in data if item.get('translated') and item['translated'].strip())
         
         return {
             'total': total,
             'translated': translated,
-            'untranslated': untranslated,
+            'untranslated': total - translated,
             'progress': round(translated / total * 100, 2) if total > 0 else 0
         }
     
-    async def _progress_callback(self, progress: float, message: str, 
-                                stats_callback: Optional[Callable] = None):
-        """进度回调函数
-        
-        Args:
-            progress: 进度百分比（0-1）
-            message: 进度消息
-            stats_callback: 统计信息回调
-        """
-        if stats_callback:
-            stats = stats_callback()
-            logger.info(f"进度: {progress:.1%} - {message} (统计: {stats['translated']}/{stats['total']} 已完成)")
-        else:
-            logger.info(f"进度: {progress:.1%} - {message}")
-    
     async def translate_file(self, input_file: str, output_file: str = None,
-                           source_lang: Optional[str] = None, 
-                           target_lang: str = "zh",
-                           batch_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """翻译JSON文件
+                           source_lang: str = "en", 
+                           target_lang: str = "zh") -> Dict[str, Any]:
+        """翻译JSON文件（高并发单请求版本）
+        
+        实现用户要求的逻辑：
+        1. 加载: 使用 json.load 读取整个文件
+        2. 过滤: 创建 pending_items 列表，只包含 item['translated'] is None 的对象引用
+        3. 并发处理: 使用 asyncio 创建高并发任务池，最多20个并发请求
+        4. 逐个处理: 每个任务处理一个条目
+        5. 就地更新: 直接修改原始对象，不丢失元数据
+        6. 定期保存: 每50个项目保存一次进度
         
         Args:
             input_file: 输入JSON文件路径
             output_file: 输出JSON文件路径（默认覆盖原文件）
-            source_lang: 源语言代码（可选）
-            target_lang: 目标语言代码（必选）
-            batch_callback: 批次完成回调函数
+            source_lang: 源语言代码（默认：en）
+            target_lang: 目标语言代码（默认：zh）
             
         Returns:
             翻译结果统计信息
@@ -232,106 +223,87 @@ class JSONProcessor:
         logger.info(f"开始处理JSON文件: {input_path} -> {output_path}")
         
         try:
-            # 验证文件存在
+            # 1. 加载JSON文件
             if not input_path.exists():
                 raise FileProcessingError(f"输入文件不存在: {input_path}")
             
-            # 读取和验证JSON数据
             with open(input_path, 'r', encoding='utf-8') as f:
-                raw_data = json.load(f)
+            data = json.load(f)
             
-            data = self._validate_json_structure(raw_data)
+            if not isinstance(data, list):
+                raise FileProcessingError("JSON数据必须是数组格式")
             
-            # 获取统计信息
+            if not data:
+                logger.info("JSON数组为空，无需翻译")
+                return {
+                    'total': 0,
+                    'translated': 0,
+                    'untranslated': 0,
+                    'progress': 100,
+                    'success': True
+                }
+            
+            # 初始统计
             stats = self._get_translation_stats(data)
             logger.info(f"文件统计: 总计 {stats['total']} 条目, {stats['translated']} 已翻译, {stats['untranslated']} 待翻译")
             
-            if stats['untranslated'] == 0:
+            # 2. 过滤 - 创建pending_items列表，只包含translated为None的项目引用
+            pending_items = self._get_untranslated_items(data)
+            
+            if not pending_items:
                 logger.info("没有需要翻译的条目")
                 return stats
             
-            # 过滤未翻译条目
-            untranslated_items = self._filter_untranslated_items(data)
-            logger.info(f"开始翻译 {len(untranslated_items)} 个未完成条目")
+            logger.info(f"开始并发翻译 {len(pending_items)} 个未完成条目")
             
-            # 创建批次回调
-            async def batch_progress_callback(progress: float, message: str):
-                if batch_callback:
-                    await batch_callback(progress, message)
-                await self._progress_callback(progress, message, lambda: stats)
+            # 3. 高并发处理 - 使用asyncio.as_completed处理任务
+            completed_count = 0
+            backup_path = None
             
-            # 提取需要翻译的文本
-            texts = [item['original'] for item in untranslated_items]
-            
-            # 执行翻译
-            try:
-                translation_results = await self.translator.translate_batch(
-                    texts=texts,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    progress_callback=batch_progress_callback
-                )
+            with tqdm(total=len(pending_items), desc="翻译进度") as pbar:
+                # 创建所有任务
+                tasks = []
+                for item in pending_items:
+                    task = asyncio.create_task(
+                        self._translate_single_item(item, source_lang, target_lang)
                 
-                # 回填翻译结果
-                result_index = 0
-                for i, item in enumerate(data):
-                    if item.get('translated') is None or item.get('translated') == "":
-                        if result_index < len(translation_results):
-                            item['translated'] = translation_results[result_index]['translated']
-                            item['translated_at'] = datetime.now().isoformat()
-                            result_index += 1
-                
-                # 保存结果
-                success = self._save_progress(data, str(output_path))
-                
-                if success:
-                    # 更新统计信息
-                    final_stats = self._get_translation_stats(data)
-                    final_stats['success'] = True
-                    final_stats['output_file'] = str(output_path)
+                # 使用asyncio.as_completed处理任务
+                for completed_task in asyncio.as_completed(tasks):
+                    try:
+                        result = await completed_task
+                        completed_count += 1
+                        
+                        # 更新进度条
+                        pbar.set_postfix({
+                            '成功率': f"{completed_count/len(pending_items)*100:.1f}%"
+                        })
+                        pbar.update(1)
+                        
+                        # 5. 定期保存进度 - 每50个项目保存一次
+                        if completed_count % self.SAVE_INTERVAL == 0:
+                    # 保存进度
+                    self._save_progress(data, str(output_path), backup_path)
+                    logger.info(f"已保存进度: {completed_count}/{len(pending_items)}")
                     
-                    logger.info(f"翻译完成! 成功率: {final_stats['progress']}%")
-                    return final_stats
-                else:
-                    raise FileProcessingError("保存翻译结果失败")
-                
-            except Exception as e:
-                logger.error(f"翻译过程失败: {e}")
-                # 尝试保存当前进度
-                self._save_progress(data, str(output_path))
-                raise
+                    except Exception as e:
+                        logger.error(f"处理任务失败: {e}")
+                        continue
+            
+            # 6. 最终保存
+            self._save_progress(data, str(output_path), backup_path)
+            
+            # 最终统计
+            final_stats = self._get_translation_stats(data)
+            final_stats['success'] = True
+            final_stats['output_file'] = str(output_path)
+            
+            logger.info(f"翻译完成! 成功率: {final_stats['progress']}%")
+            return final_stats
             
         except Exception as e:
             logger.error(f"处理JSON文件失败: {e}")
             raise FileProcessingError(f"处理JSON文件失败: {e}")
     
-    async def check_status(self, input_file: str) -> Dict[str, Any]:
-        """检查JSON文件的翻译状态
-        
-        Args:
-            input_file: JSON文件路径
-            
-        Returns:
-            状态信息
-        """
-        try:
-            with open(input_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            data = self._validate_json_structure(data)
-            stats = self._get_translation_stats(data)
-            
-            return {
-                'file': str(input_file),
-                'exists': True,
-                'stats': stats,
-                'status': 'completed' if stats['untranslated'] == 0 else 'incomplete'
-            }
-            
-        except Exception as e:
-            return {
-                'file': str(input_file),
-                'exists': os.path.exists(input_file),
-                'error': str(e),
-                'status': 'error'
-            }
+    async def close(self):
+        """关闭客户端连接"""
+        await self.client.close()

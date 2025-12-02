@@ -4,6 +4,6 @@
 提供HTTP API服务，适配OpenAI格式
 """
 
-from .api import DoubaoServer
+from .api import DoubaoServer, run_server
 
-__all__ = ["DoubaoServer"]
+__all__ = ["DoubaoServer", "run_server"]

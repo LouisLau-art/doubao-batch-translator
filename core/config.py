@@ -8,6 +8,14 @@ import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
+# 加载.env文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # 加载.env文件
+except ImportError:
+    # 如果没有python-dotenv，跳过.env加载
+    pass
+
 
 # 豆包API配置常量
 DOUBAO_API_URL = "https://ark.cn-beijing.volces.com/api/v3/responses"
@@ -183,6 +191,5 @@ def format_api_request(model: str, input_items: List[Dict],
     
     return {
         "model": model,
-        "input": input_array,
-        "response_format": {"type": "json_object"}
+        "input": input_array
     }
