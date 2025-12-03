@@ -4,3 +4,10 @@ node_modules/
 translated/
 .cache/
 logs/
+*.epub
+debug_original/
+debug_translated/
+extracted_epub/
+epub_word_counter.py
+epub_word_counter1.py
+doubao-translator.log

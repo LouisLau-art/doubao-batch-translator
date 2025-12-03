@@ -9,13 +9,25 @@ from .config import (
     SUPPORTED_LANGUAGES,
     validate_language_code,
     get_language_name,
-    format_api_request,
+    # format_api_request,
     DOUBAO_API_URL,
     DOUBAO_MODEL,
     DOUBAO_API_KEY_ENV
 )
-from .exceptions import *
-from .translator import AsyncTranslator
+from .client import AsyncTranslator
+from .exceptions import (
+    TranslatorError,
+    APIError,
+    RateLimitError,
+    AuthenticationError,
+    ConfigurationError,
+    ValidationError,
+    FileProcessingError,
+    BatchProcessingError,
+    NetworkError,
+    TimeoutError,
+    UnsupportedLanguageError
+)
 
 __version__ = "2.0.0"
 __all__ = [
@@ -24,16 +36,16 @@ __all__ = [
     "SUPPORTED_LANGUAGES", 
     "validate_language_code",
     "get_language_name",
-    "format_api_request",
-    
+    # "format_api_request",
+
     # 常量
     "DOUBAO_API_URL",
     "DOUBAO_MODEL", 
     "DOUBAO_API_KEY_ENV",
-    
+
     # 核心类
     "AsyncTranslator",
-    
+
     # 异常类
     "TranslatorError",
     "APIError",

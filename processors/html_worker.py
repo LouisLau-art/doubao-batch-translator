@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup, NavigableString, Comment
 
 from core import AsyncTranslator, ValidationError
+from core.token_tracker import TokenTracker
 from core.exceptions import FileProcessingError
 
 
@@ -27,6 +28,10 @@ class HTMLProcessor:
             translator: 异步翻译器实例
         """
         self.translator = translator
+        self.token_tracker = TokenTracker()  # 用于token估算
+        
+        # 模型限制 - 设置为800以留出足够误差余地
+        self.MAX_TOKEN_PER_TEXT = 800  # 最大输入Token长度
         
         # 不翻译的标签列表
         self.exclude_tags = {
@@ -69,10 +74,23 @@ class HTMLProcessor:
         if self.url_pattern.match(text):
             return True
         
-        # 检查是否为常见域名或IP地址
+        # 检查是否为常见域名格式 (如 example.com, www.example.org)
+        # 只有当文本看起来像域名时才返回 True
         try:
             parsed = urlparse(text)
-            return bool(parsed.scheme) or '.' in text
+            # 只有当有明确的 scheme 时才认为是 URL
+            if parsed.scheme and parsed.scheme in ('http', 'https', 'ftp', 'file', 'mailto', 'tel'):
+                return True
+            
+            # 检查是否为纯域名格式 (无空格，包含点，且看起来像域名)
+            if ' ' not in text and '.' in text:
+                # 检查是否匹配常见域名模式 (如 example.com, www.test.org)
+                domain_pattern = re.compile(
+                    r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)+$'
+                )
+                return bool(domain_pattern.match(text))
+            
+            return False
         except:
             return False
     
@@ -252,6 +270,94 @@ class HTMLProcessor:
         
         return translatable
     
+    def _split_text(self, text: str) -> List[str]:
+        """将长文本拆分为符合模型token限制的小块
+        
+        Args:
+            text: 待拆分的长文本
+            
+        Returns:
+            拆分后的文本块列表
+        """
+        if not text:
+            return []
+            
+        # 估算当前文本的token数量
+        estimated_tokens = self.token_tracker.estimate_tokens(text)
+        
+        # 如果不超过限制，直接返回
+        if estimated_tokens <= self.MAX_TOKEN_PER_TEXT:
+            return [text]
+            
+        # 尝试按句子拆分
+        sentences = re.split(r'(?<=[.!?。！？])\s+', text)
+        
+        # 合并句子，确保每个块不超过token限制
+        chunks = []
+        current_chunk = ""
+        current_tokens = 0
+        
+        for sentence in sentences:
+            sentence_tokens = self.token_tracker.estimate_tokens(sentence)
+            
+            # 如果单个句子就超过限制，进一步按段落拆分
+            if sentence_tokens > self.MAX_TOKEN_PER_TEXT:
+                paragraphs = sentence.split('\n\n')
+                
+                for paragraph in paragraphs:
+                    paragraph_tokens = self.token_tracker.estimate_tokens(paragraph)
+                    
+                    # 如果单个段落仍超过限制，按逗号拆分
+                    if paragraph_tokens > self.MAX_TOKEN_PER_TEXT:
+                        segments = paragraph.split(',')
+                        
+                        for segment in segments:
+                            segment_tokens = self.token_tracker.estimate_tokens(segment)
+                            
+                            if segment_tokens > self.MAX_TOKEN_PER_TEXT:
+                                # 极端情况：按空格拆分
+                                words = segment.split()
+                                temp_chunk = ""
+                                temp_tokens = 0
+                                
+                                for word in words:
+                                    word_tokens = self.token_tracker.estimate_tokens(word + ' ')
+                                    
+                                    if temp_tokens + word_tokens > self.MAX_TOKEN_PER_TEXT and temp_chunk:
+                                        chunks.append(temp_chunk.strip())
+                                        temp_chunk = ""
+                                        temp_tokens = 0
+                                        
+                                    temp_chunk += word + ' '
+                                    temp_tokens += word_tokens
+                                    
+                                if temp_chunk:
+                                    chunks.append(temp_chunk.strip())
+                            else:
+                                chunks.append(segment.strip() + ',')
+                    else:
+                        chunks.append(paragraph.strip())
+            else:
+                # 合并句子
+                new_tokens = current_tokens + sentence_tokens
+                
+                if new_tokens > self.MAX_TOKEN_PER_TEXT:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                    current_tokens = sentence_tokens
+                else:
+                    current_chunk += ' ' + sentence if current_chunk else sentence
+                    current_tokens = new_tokens
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+            
+        # 清理可能的重复标点
+        chunks = [re.sub(r'([.!?。！？,])\1+', r'\1', chunk) for chunk in chunks]
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        
+        return chunks
+
     def _is_chinese_text(self, text: str) -> bool:
         """判断文本是否主要为中文
         
@@ -267,8 +373,8 @@ class HTMLProcessor:
         # 如果中文字符超过50%，认为不需要翻译
         return chinese_chars / total_chars > 0.5 if total_chars > 0 else False
     
-    async def _translate_texts_batch(self, texts: List[str], source_lang: Optional[str], 
-                                   target_lang: str) -> List[str]:
+    async def _translate_texts_batch(self, texts: List[str], source_lang: Optional[str],
+                                    target_lang: str) -> List[str]:
         """批量翻译文本
         
         Args:
@@ -282,25 +388,36 @@ class HTMLProcessor:
         if not texts:
             return []
         
-        try:
-            results = await self.translator.translate_batch(
-                texts=texts,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                progress_callback=lambda p, m: logger.debug(f"HTML翻译进度: {p:.1%} - {m}")
-            )
+        translated_results = []
+        
+        for text in texts:
+            # 拆分长文本
+            chunks = self._split_text(text)
             
-            # 提取翻译结果
-            translated = []
-            for result in results:
-                translated.append(result.get('translated', ''))
-            
-            return translated
-            
-        except Exception as e:
-            logger.error(f"HTML文本批量翻译失败: {e}")
-            # 返回原文作为回退
-            return texts
+            # 翻译所有拆分后的文本块
+            try:
+                chunk_results = await self.translator.translate_batch(
+                    texts=chunks,
+                    source_lang=source_lang,
+                    target_lang=target_lang
+                )
+                
+                # 合并翻译结果
+                translated_text = ' '.join(chunk_results)
+                
+                # 检查是否有翻译失败的标记
+                if '[TRANSLATION_FAILED]' in translated_text:
+                    # 如果有翻译失败的块，返回原文
+                    translated_results.append(text)
+                else:
+                    translated_results.append(translated_text)
+                    
+            except Exception as e:
+                logger.error(f"翻译文本块失败: {e}")
+                # 返回原文作为回退
+                translated_results.append(text)
+        
+        return translated_results
     
     async def process_file(self, input_file: str, output_file: str = None,
                           source_lang: Optional[str] = None, 
@@ -322,6 +439,14 @@ class HTMLProcessor:
             # 读取HTML文件
             with open(input_file, 'r', encoding='utf-8') as f:
                 html_content = f.read()
+            
+            # 提取并保存 XML 声明（如果存在）
+            xml_declaration = None
+            xml_decl_pattern = re.compile(r'^<\?xml[^?]*\?>\s*', re.IGNORECASE)
+            xml_match = xml_decl_pattern.match(html_content)
+            if xml_match:
+                xml_declaration = xml_match.group(0).rstrip()
+                html_content = html_content[xml_match.end():]
             
             # 解析HTML
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -388,6 +513,9 @@ class HTMLProcessor:
             # 保存结果
             output_path = output_file or input_file
             with open(output_path, 'w', encoding='utf-8') as f:
+                # 恢复 XML 声明（如果原文件有）
+                if xml_declaration:
+                    f.write(xml_declaration + '\n')
                 f.write(str(soup))
             
             logger.info(f"HTML翻译完成: {translated_count} 个文本翻译成功")
