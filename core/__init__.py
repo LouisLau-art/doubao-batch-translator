@@ -1,61 +1,60 @@
 #!/usr/bin/env python3
 """
-豆包翻译模型统一接口 - 核心模块
-提供异步翻译、批处理、并发控制等功能
+Core module initialization
 """
 
+# 导出配置相关
 from .config import (
-    TranslatorConfig, 
+    TranslatorConfig,
+    DOUBAO_TRANSLATION_URL,  # [新增]
+    DOUBAO_CHAT_URL,         # [新增]
     SUPPORTED_LANGUAGES,
     validate_language_code,
     get_language_name,
-    # format_api_request,
-    DOUBAO_API_URL,
-    DOUBAO_MODEL,
     DOUBAO_API_KEY_ENV
 )
-from .client import AsyncTranslator
+
+# 导出客户端相关
+from .client import (
+    AsyncDoubaoClient,
+    AsyncTranslator
+)
+
+# 导出异常相关
 from .exceptions import (
     TranslatorError,
+    ConfigurationError,
     APIError,
     RateLimitError,
     AuthenticationError,
-    ConfigurationError,
     ValidationError,
-    FileProcessingError,
-    BatchProcessingError,
-    NetworkError,
-    TimeoutError,
-    UnsupportedLanguageError
+    FileProcessingError
 )
 
-__version__ = "2.0.0"
+# 导出版本号
+__version__ = "2.1.0"
+
+# 定义导出的符号列表
 __all__ = [
-    # 配置类
+    # Config
     "TranslatorConfig",
-    "SUPPORTED_LANGUAGES", 
+    "DOUBAO_TRANSLATION_URL",
+    "DOUBAO_CHAT_URL",
+    "SUPPORTED_LANGUAGES",
     "validate_language_code",
     "get_language_name",
-    # "format_api_request",
-
-    # 常量
-    "DOUBAO_API_URL",
-    "DOUBAO_MODEL", 
     "DOUBAO_API_KEY_ENV",
-
-    # 核心类
+    
+    # Client
+    "AsyncDoubaoClient",
     "AsyncTranslator",
-
-    # 异常类
+    
+    # Exceptions
     "TranslatorError",
+    "ConfigurationError",
     "APIError",
     "RateLimitError",
     "AuthenticationError",
-    "ConfigurationError",
-    "ValidationError", 
-    "FileProcessingError",
-    "BatchProcessingError",
-    "NetworkError",
-    "TimeoutError",
-    "UnsupportedLanguageError"
+    "ValidationError",
+    "FileProcessingError"
 ]

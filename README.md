@@ -5,7 +5,36 @@
 ## 🚀 核心特性
 
 ### 架构特点
-- **一核多壳设计**: 核心`AsyncTranslator`提供统一翻译能力，外层处理器适配不同场景。
+- **一核多壳设计**: 核心`AsyncTranslator`提供统一翻译能力，外层处理器适配不同场景
+- **异步并发**: 基于asyncio的高效异步处理，支持并发翻译
+- **模块化设计**: 各功能模块独立，便于维护和扩展
+
+## 📁 项目结构
+
+```
+doubao-batch-translator/
+├── main.py                    # 主入口文件
+├── requirements.txt           # 项目依赖
+├── README.md                  # 项目说明文档
+├── .env.example               # 环境变量示例
+├── .gitignore                 # Git忽略文件
+├── PROJECT_STRUCTURE.md       # 项目结构说明
+├── check_untranslated.py      # 检查未翻译内容的脚本
+│
+├── core/                      # 核心模块
+│   ├── client.py              # 异步翻译客户端
+│   ├── config.py              # 配置管理
+│   ├── exceptions.py          # 自定义异常
+│   └── token_tracker.py       # Token配额跟踪
+│
+├── processors/                # 处理器模块
+│   ├── json_worker.py         # JSON文件处理器
+│   ├── html_worker.py         # HTML文件处理器
+│   └── epub_worker.py         # ePub电子书处理器
+│
+└── server/                    # HTTP服务器模块
+      └── api.py               # API服务实现
+```
 
 ## 📋 环境要求
 
@@ -28,8 +57,11 @@ pip install -r requirements.txt
 ### 2. 配置API密钥
 
 ```bash
-# 设置环境变量
-export ARK_API_KEY=your_api_key_here
+# 复制环境变量示例文件
+cp .env.example .env
+
+# 编辑 .env 文件，设置API密钥
+# ARK_API_KEY=your_api_key_here
 ```
 
 ### 3. 基本使用
@@ -38,14 +70,21 @@ export ARK_API_KEY=your_api_key_here
 
 ```bash
 # 基本用法
-python main.py json --file translation_work.json
+python main.py json --file <your_json_file_path>
 ```
 
 #### HTML文件翻译
 
 ```bash
 # 基本用法
-python main.py html --file input.html --output translated.html --target-lang zh
+python main.py html --file <your_html_file_path> --output translated.html --target-lang zh
+```
+
+#### ePub电子书翻译
+
+```bash
+# 基本用法
+python main.py epub --file <your_epub_file_path> --output translated.epub --target-lang zh
 ```
 
 #### 启动HTTP API服务器
@@ -58,7 +97,6 @@ python main.py server --port 8000
 ### 4. Token配额管理
 - **每日2M免费额度监控**: 实时跟踪token使用量，防止超额
 - **断点续传**: 支持翻译进度保存，中断后可继续
-```
 
 ## 🔧 详细配置
 
@@ -66,7 +104,32 @@ python main.py server --port 8000
 
 #### 通用参数
 - `--api-key`: API密钥（可选，默认从环境变量读取）
-- `--verbose, -v**: 启用详细日志
+- `--verbose, -v`: 启用详细日志
+- `--max-concurrent`: 最大并发请求数（默认: 20）
+- `--max-rps`: 每秒最大请求数（默认: 10.0）
+
+#### JSON翻译参数
+- `--file, -f`: 输入文件（必需）
+- `--output, -o`: 输出文件
+- `--source-lang`: 源语言
+- `--target-lang, -t`: 目标语言（默认: zh）
+
+#### HTML翻译参数
+- `--file, -f`: 输入文件（必需）
+- `--output, -o`: 输出文件
+- `--source-lang`: 源语言
+- `--target-lang, -t`: 目标语言（默认: zh）
+
+#### ePub翻译参数
+- `--file, -f`: 输入文件（必需）
+- `--output, -o`: 输出文件（必需）
+- `--source-lang`: 源语言
+- `--target-lang, -t`: 目标语言（默认: zh）
+
+#### 服务器参数
+- `--host`: 绑定地址（默认: 0.0.0.0）
+- `--port, -p`: 监听端口（默认: 8000）
+- `--debug`: 启用调试模式
 
 ### 环境变量配置
 
@@ -86,7 +149,6 @@ export ARK_API_KEY=your_api_key
 | ja | 日语 | ko | 韩语 |
 | th | 泰语 | vi | 越南语 |
 | ru | 俄语 | ar | 阿拉伯语 |
-```
 
 ## 🔄 断点续传机制
 
@@ -126,8 +188,9 @@ export ARK_API_KEY=your_api_key
 pip install -r requirements.txt
 ```
 
----
+### 项目结构说明
+详细的项目结构说明请参考 [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) 文件。
 
-**Git commit message**: "feat: implement token quota management and CLI tool structure"
+---
 
 **注意**: 本工具专为高效利用豆包API的免费额度而设计，强烈建议在处理大型文件时监控翻译进度，确保符合每日额度限制。

@@ -1,254 +1,191 @@
 #!/usr/bin/env python3
 """
-Doubao API Client - 单请求高并发翻译客户端
-专门适配 doubao-seed-translation-250915 模型
-包含连接池复用、重试机制和错误处理
+Doubao API Client - 终极版
+特性：智能双模 + 动态并发 + 熔断机制 + 身份显式日志
 """
 
-import json
 import asyncio
 import httpx
 import logging
 import os
-from typing import Optional, Dict, Any, List, Union
+import re
+from typing import List, Dict, Set
 
 from core.token_tracker import TokenTracker
+from core.config import DOUBAO_TRANSLATION_URL, DOUBAO_CHAT_URL
 
 logger = logging.getLogger(__name__)
 
-# 模型限制 - 设置为800以留出足够误差余地
-MAX_TOKEN_PER_TEXT = 800  # 最大输入Token长度
+# 阈值：超过此长度直接使用大模型
+THRESHOLD_TOKENS_FOR_LARGE_MODEL = 700
 
 class AsyncDoubaoClient:
-    """异步豆包翻译客户端 (支持连接复用与重试)"""
-    
-    def __init__(self, api_key: str, model: str = "doubao-seed-translation-250915"):
-        """初始化客户端"""
+    def __init__(self, api_key: str, models: List[str], max_concurrent: int = 30):
         self.api_key = api_key
-        self.model = model
+        self.models = models if models else ["doubao-seed-translation-250915"]
         self.token_tracker = TokenTracker()
-        # 优先从环境变量读取 Endpoint，否则使用默认值
-        self.api_url = os.getenv("API_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/responses")
         
-        # 并发控制
-        self.semaphore = asyncio.Semaphore(20)  # 限制并发数为20
+        # 熔断列表：记录已经彻底挂掉的模型
+        self.disabled_models: Set[str] = set()
         
-        # 共享的 HTTP 客户端 (关键优化：复用连接池)
+        # --- 动态并发控制 ---
+        self.sem_high = asyncio.Semaphore(max_concurrent)
+        low_limit = min(5, max_concurrent) 
+        self.sem_low = asyncio.Semaphore(low_limit)
+        
+        logger.info(f"并发策略初始化: 高性能模式={max_concurrent}, 保守模式={low_limit}")
+        
         self.client = httpx.AsyncClient(
-            timeout=30.0,
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=30),
+            timeout=90.0,
+            limits=httpx.Limits(max_keepalive_connections=max_concurrent, max_connections=max_concurrent + 10),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             }
         )
-        
-        # 重试配置
-        self.max_retries = 3
-        self.retry_delay = 1.0  # 基础等待秒数
 
-    def _split_text(self, text: str) -> List[str]:
-        """将长文本拆分为符合模型token限制的小块"""
-        if not text:
-            return []
-            
-        # 估算当前文本的token数量
-        estimated_tokens = self.token_tracker.estimate_tokens(text)
-        
-        # 如果不超过限制，直接返回
-        if estimated_tokens <= MAX_TOKEN_PER_TEXT:
-            return [text]
-            
-        # 尝试按句子拆分
-        sentences = re.split(r'(?<=[.!?。！？])\s+', text)
-        
-        # 合并句子，确保每个块不超过token限制
-        chunks = []
-        current_chunk = ""
-        current_tokens = 0
-        
-        for sentence in sentences:
-            sentence_tokens = self.token_tracker.estimate_tokens(sentence)
-            
-            # 如果单个句子就超过限制，进一步按段落拆分
-            if sentence_tokens > MAX_TOKEN_PER_TEXT:
-                paragraphs = sentence.split('\n\n')
-                
-                for paragraph in paragraphs:
-                    paragraph_tokens = self.token_tracker.estimate_tokens(paragraph)
-                    
-                    # 如果单个段落仍超过限制，按逗号拆分
-                    if paragraph_tokens > MAX_TOKEN_PER_TEXT:
-                        segments = paragraph.split(',')
-                        
-                        for segment in segments:
-                            segment_tokens = self.token_tracker.estimate_tokens(segment)
-                            
-                            if segment_tokens > MAX_TOKEN_PER_TEXT:
-                                # 极端情况：按空格拆分
-                                words = segment.split()
-                                temp_chunk = ""
-                                temp_tokens = 0
-                                
-                                for word in words:
-                                    word_tokens = self.token_tracker.estimate_tokens(word + ' ')
-                                    
-                                    if temp_tokens + word_tokens > MAX_TOKEN_PER_TEXT and temp_chunk:
-                                        chunks.append(temp_chunk.strip())
-                                        temp_chunk = ""
-                                        temp_tokens = 0
-                                        
-                                    temp_chunk += word + ' '
-                                    temp_tokens += word_tokens
-                                    
-                                if temp_chunk:
-                                    chunks.append(temp_chunk.strip())
-                            else:
-                                chunks.append(segment.strip() + ',')
-                    else:
-                        chunks.append(paragraph.strip())
-            else:
-                # 合并句子
-                new_tokens = current_tokens + sentence_tokens
-                
-                if new_tokens > MAX_TOKEN_PER_TEXT:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = sentence
-                    current_tokens = sentence_tokens
-                else:
-                    current_chunk += ' ' + sentence if current_chunk else sentence
-                    current_tokens = new_tokens
-        
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-            
-        # 清理可能的重复标点
-        chunks = [re.sub(r'([.!?。！？,])\1+', r'\1', chunk) for chunk in chunks]
-        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
-        
-        return chunks
+    def _get_semaphore(self, model: str) -> asyncio.Semaphore:
+        model_lower = model.lower()
+        low_limit_keywords = ["seed-translation", "kimi"]
+        if any(kw in model_lower for kw in low_limit_keywords):
+            return self.sem_low
+        return self.sem_high
 
     async def async_translate(self, text: str, source: str = "en", target: str = "zh") -> str:
-        """异步翻译单个文本 (带重试机制)"""
+        if not text.strip(): return text
+
+        est_tokens = self.token_tracker.estimate_tokens(text)
+        start_index = 0
         
-        # 拆分长文本
-        chunks = self._split_text(text)
+        # 长文本跳过策略 (跳过第一个 Seed 模型)
+        if est_tokens > THRESHOLD_TOKENS_FOR_LARGE_MODEL and len(self.models) > 1:
+            if "seed" in self.models[0]:
+                start_index = 1
+
+        last_exception = None
         
-        # 如果只有一个块，直接翻译
-        if len(chunks) == 1:
-            # 构造豆包特有的 Payload
-            payload = {
-                "model": self.model,
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": chunks[0],
-                                "translation_options": {
-                                    "source_language": source,
-                                    "target_language": target
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
+        # 遍历模型池
+        for i in range(start_index, len(self.models)):
+            model = self.models[i]
             
-            async with self.semaphore:
-                for attempt in range(self.max_retries):
-                    try:
-                        response = await self.client.post(self.api_url, json=payload)
-                        
-                        # 处理限流 (429) 和服务器错误 (5xx)
-                        if response.status_code == 429 or response.status_code >= 500:
-                            error_msg = f"HTTP {response.status_code}"
-                            if attempt < self.max_retries - 1:
-                                wait_time = self.retry_delay * (2 ** attempt)  # 指数退避
-                                logger.warning(f"请求失败 ({error_msg})，{wait_time}秒后重试... [尝试 {attempt+1}/{self.max_retries}]")
-                                await asyncio.sleep(wait_time)
-                                continue
+            # 熔断检查
+            if model in self.disabled_models:
+                continue
+
+            semaphore = self._get_semaphore(model)
+            
+            async with semaphore:
+                try:
+                    retries = 2 if i == 0 else 1
+                    for attempt in range(retries):
+                        try:
+                            if self._is_translation_special_model(model):
+                                return await self._request_special_endpoint(text, source, target, model)
                             else:
-                                response.raise_for_status()
-
-                        response.raise_for_status() # 检查其他错误
-                        return self._parse_response(response.json())
+                                return await self._request_chat_endpoint(text, source, target, model)
                         
-                    except httpx.RequestError as e:
-                        # 网络层面的错误（如连接超时、DNS 失败）
-                        if attempt < self.max_retries - 1:
-                            logger.warning(f"网络错误: {e}，正在重试... [尝试 {attempt+1}/{self.max_retries}]")
-                            await asyncio.sleep(1)
-                        else:
-                            logger.error(f"网络请求最终失败: {e}")
-                            raise Exception(f"翻译请求失败: {e}")
-                    
-                    except Exception as e:
-                        # 其他不可预知的错误
-                        logger.error(f"翻译过程中发生错误: {e}")
-                        raise e
-        
-        # 如果有多个块，递归调用翻译每个块，然后合并结果
-        tasks = [self.async_translate(chunk, source, target) for chunk in chunks]
-        results = await asyncio.gather(*tasks)
-        
-        # 合并结果并返回
-        return ' '.join(results)
+                        except Exception as e:
+                            error_str = str(e)
+                            
+                            # 严重错误熔断
+                            if "SetLimitExceeded" in error_str or "insufficient_quota" in error_str:
+                                logger.error(f"🚫 模型 {model} 额度用尽，已永久拉黑。")
+                                self.disabled_models.add(model)
+                                raise e 
 
-    def _parse_response(self, response_data: Dict) -> str:
-        """解析豆包API响应"""
-        try:
-            if "output" in response_data:
-                output_list = response_data["output"]
-                if output_list and isinstance(output_list, list):
-                    first_output = output_list[0]
-                    content_list = first_output.get("content", [])
-                    if content_list and isinstance(content_list, list):
-                        return content_list[0].get("text", "").strip()
+                            if attempt == retries - 1:
+                                raise e
+                            await asyncio.sleep(1)
+                    break 
+                            
+                except Exception as e:
+                    last_exception = e
+                    continue 
+
+        if last_exception:
+            logger.error(f"❌ 翻译失败 (所有可用模型均尝试失败)")
+        return "[TRANSLATION_FAILED]"
+
+    def _is_translation_special_model(self, model_name: str) -> bool:
+        return "seed-translation" in model_name
+
+    def _get_system_prompt(self, target_lang: str) -> str:
+        lang_map = {"zh": "Simplified Chinese", "en": "English", "jp": "Japanese"}
+        target_name = lang_map.get(target_lang, target_lang)
+        return (
+            f"You are a professional literary translator. Translate into {target_name}.\n"
+            "Rules:\n"
+            "1. Output ONLY the translation. No notes/explanations.\n"
+            "2. Keep original style and tone.\n"
+            "3. Handle fragments as fragments."
+        )
+
+    async def _request_special_endpoint(self, text: str, source: str, target: str, model: str) -> str:
+        """Seed 模型接口"""
+        payload = {
+            "model": model,
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": text, 
+                       "translation_options": {"source_language": source, "target_language": target}}]}]
+        }
+        response = await self.client.post(DOUBAO_TRANSLATION_URL, json=payload)
+        
+        if response.status_code != 200:
+            raise Exception(f"Seed API {response.status_code}: {response.text}")
             
-            # 如果结构不匹配，记录日志并抛出
-            logger.error(f"API响应格式异常: {response_data}")
-            raise Exception("API响应格式无法解析")
+        # [新增] 成功日志
+        logger.info(f"✅ [{model}] 翻译成功")
+        return response.json()["output"][0]["content"][0]["text"].strip()
+
+    async def _request_chat_endpoint(self, text: str, source: str, target: str, model: str) -> str:
+        """通用 Chat 接口"""
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": self._get_system_prompt(target)},
+                {"role": "user", "content": text}
+            ],
+            "stream": False,
+            "temperature": 0.3
+        }
+        response = await self.client.post(DOUBAO_CHAT_URL, json=payload)
+        
+        if response.status_code != 200:
+            raise Exception(f"Chat API {response.status_code}: {response.text}")
             
-        except Exception as e:
-            raise Exception(f"解析响应数据失败: {e}")
+        # [新增] 成功日志
+        logger.info(f"✅ [{model}] 翻译成功")
+        return response.json()["choices"][0]["message"]["content"].strip()
 
     async def close(self):
-        """关闭客户端连接池"""
         await self.client.aclose()
 
 
 class AsyncTranslator:
-    """批量翻译适配器"""
-    
-    def __init__(self, api_key: str, model: str = "doubao-seed-translation-250915"):
-        self.client = AsyncDoubaoClient(api_key, model)
+    """适配器"""
+    def __init__(self, config_or_key):
+        if isinstance(config_or_key, str):
+            models = ["doubao-seed-translation-250915"]
+            api_key = config_or_key
+            max_concurrent = 20
+        else:
+            api_key = config_or_key.api_key
+            models = getattr(config_or_key, 'models', [])
+            max_concurrent = getattr(config_or_key, 'max_concurrent', 30)
+            
+            if not models and hasattr(config_or_key, 'model'):
+                models = [config_or_key.model]
+                
+        self.client = AsyncDoubaoClient(api_key, models, max_concurrent)
     
     async def translate_batch(self, texts: List[str], source_lang: str = "en", target_lang: str = "zh") -> List[str]:
-        """批量并发翻译"""
         tasks = [
             self.client.async_translate(text, source_lang, target_lang)
             for text in texts
         ]
-        # return_exceptions=True 允许部分成功，而不是一个报错全部崩溃
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 处理异常结果，将异常转换为特定的错误文本，防止后续流程崩溃
-        final_results = []
-        for res in results:
-            if isinstance(res, Exception):
-                logger.error(f"批处理中单个任务失败: {res}")
-                final_results.append("[TRANSLATION_FAILED]") # 标记失败
-            else:
-                final_results.append(res)
-        return final_results
+        return await asyncio.gather(*tasks)
     
     async def close(self):
         await self.client.close()
     
-    async def __aenter__(self):
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
+    async def __aenter__(self): return self
+    async def __aexit__(self, *args): await self.close()

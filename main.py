@@ -52,9 +52,9 @@ class MainCLI:
         parser.add_argument("--api-key", help="豆包API密钥")
         parser.add_argument("--verbose", "-v", action="store_true", help="启用详细日志")
         
-        # 全局并发控制参数 (移动到父级，让所有子命令都能用)
-        parser.add_argument("--max-concurrent", type=int, help="最大并发请求数 (默认: 20)")
-        parser.add_argument("--max-rps", type=float, help="每秒最大请求数 (默认: 10.0)")
+        # 全局并发控制参数
+        parser.add_argument("--max-concurrent", type=int, help="最大并发请求数 (建议: 30)")
+        parser.add_argument("--max-rps", type=float, help="每秒最大请求数 (建议: 20.0)")
         
         # 子命令
         subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -92,36 +92,28 @@ class MainCLI:
         """获取配置对象"""
         config_kwargs = {}
         
-        # 优先使用命令行参数，其次读取环境变量
-        if args.api_key:
-            api_key = args.api_key
-        else:
-            api_key = os.getenv("ARK_API_KEY")
-            
-        if not api_key:
-            logger.error("未找到API密钥！请设置ARK_API_KEY环境变量或使用--api-key参数。")
-            sys.exit(1)
-
         # 传递并发配置
         if args.max_concurrent:
             config_kwargs['max_concurrent'] = args.max_concurrent
         if args.max_rps:
             config_kwargs['max_requests_per_second'] = args.max_rps
             
-        return TranslatorConfig(api_key=api_key, **config_kwargs)
+        # 使用 from_args，它会内部调用 from_env 并加载 models.json
+        try:
+            return TranslatorConfig.from_args(
+                api_key=args.api_key, 
+                **config_kwargs
+            )
+        except Exception as e:
+            logger.error(f"配置加载失败: {e}")
+            sys.exit(1)
     
     def _create_translator(self, config: TranslatorConfig) -> AsyncTranslator:
         """工厂方法：创建并配置翻译器实例"""
-        # 注意：这里假设 AsyncTranslator (client.py) 已经更新支持接收 max_concurrent 参数
-        # 如果 client.py 还没改，这些参数会被忽略，但不会报错
-        translator = AsyncTranslator(config.api_key)
         
-        # [补丁] 如果 client.py 的 __init__ 没支持参数，我们在实例上强行修改
-        # 这是一个临时的 Monkey Patch，为了确保你的 CLI 参数生效
-        if hasattr(config, 'max_concurrent') and config.max_concurrent:
-            if hasattr(translator.client, 'semaphore'):
-                 translator.client.semaphore = asyncio.Semaphore(config.max_concurrent)
-                 logger.info(f"并发数已设置为: {config.max_concurrent}")
+        # [关键修复]：直接传入 config 对象，而不是只传 api_key
+        # 这样 core/client.py 才能读取到 config.models (模型池) 以及并发设置
+        translator = AsyncTranslator(config)
                  
         return translator
 
@@ -129,7 +121,6 @@ class MainCLI:
         logger.info(f"开始JSON翻译: {args.file}")
         config = self._get_config(args)
         
-        # [优化] 使用 async with 统一管理生命周期
         async with self._create_translator(config) as translator:
             processor = JSONProcessor(translator)
             try:
@@ -166,6 +157,15 @@ class MainCLI:
         logger.info(f"开始ePub翻译: {args.file}")
         config = self._get_config(args)
         
+        # 打印模型池信息，用于确认加载成功
+        if config.models:
+            print(f"🚀 模型池已加载: {len(config.models)} 个模型")
+            print(f"   首选: {config.models[0]}")
+            if len(config.models) > 1:
+                print(f"   备用: {config.models[1]} 等...")
+        else:
+            print("⚠️ 警告: 未检测到模型池，将仅使用默认模型")
+
         def progress_callback(progress: float, message: str):
             # 使用 \r 实现单行刷新进度条
             bar_length = 30
@@ -188,17 +188,15 @@ class MainCLI:
                     target_lang=args.target_lang,
                     progress_callback=progress_callback
                 )
-                print() # 进度条完成后换行
+                print() 
                 logger.info(f"ePub翻译成功! 输出: {args.output}")
             except Exception as e:
-                print() # 异常时也要换行，防止日志混乱
+                print() 
                 logger.error(f"ePub翻译失败: {e}")
                 sys.exit(1)
 
     def _handle_server_command(self, args):
         logger.info("正在启动 HTTP API 服务器...")
-        # 这里的实现逻辑通常在 server/api.py 里，保持原样即可
-        # 只要确保 args 参数能传进去
         run_server(
             host=args.host,
             port=args.port,
