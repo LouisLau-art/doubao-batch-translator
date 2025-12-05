@@ -49,12 +49,18 @@ class DoubaoServer:
         self.config = config
         self.translator: Optional[AsyncTranslator] = None
         
+        # [新增] Server层并发控制 - 防止过载
+        # 快车道模型 (DeepSeek, Doubao Pro): RPM=30000 → 500并发
+        # 慢车道会在Client层自动处理 (seed-translation: 80并发)
+        self.request_semaphore = asyncio.Semaphore(500)
+        
         # [修复 2] 使用 lifespan 管理生命周期
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             # 启动时初始化
             logger.info("初始化翻译器连接池...")
             self.translator = AsyncTranslator(self.config)
+            logger.info(f"🚀 Server并发限制: 500 (快车道), Client层会自动区分慢车道(80)")
             yield
             # 关闭时清理
             logger.info("正在关闭翻译器连接池...")
@@ -97,74 +103,76 @@ class DoubaoServer:
         
         @self.app.post("/v1/chat/completions")
         async def create_chat_completion(request: ChatCompletionRequest):
-            logger.info(f"收到请求: {request.model}")
-            
-            # 心跳检测
-            if not request.messages:
-                logger.info("空消息列表，返回心跳成功")
-                return {
-                    "id": "test-conn", 
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "choices": [{"index":0, "message":{"role":"assistant", "content":"OK"}, "finish_reason":"stop"}]
-                }
-            
-            # 提取用户消息
-            user_msg = next((m.content for m in reversed(request.messages) if m.role == "user"), None)
-            if not user_msg:
-                raise HTTPException(status_code=400, detail="未找到用户消息")
-            
-            # [修复 3] 确保 translator 存在 (lifespan 有时在测试环境可能没触发)
-            if not self.translator:
-                 self.translator = AsyncTranslator(self.config)
-            
-            try:
-                # 执行翻译
-                # 注意：request.target_language 默认是 zh，如果插件没传该参数可能会有问题
-                # 沉浸式翻译插件通常会在 system prompt 里写 "Translate to Chinese" 或者直接传参
-                # 这里我们假设插件已配置正确
+            # [新增] 使用semaphore控制并发
+            async with self.request_semaphore:
+                logger.info(f"收到请求: {request.model}")
                 
-                start_time = time.time()
-                results = await self.translator.translate_batch(
-                    texts=[user_msg],
-                    source_lang=request.source_language or "auto", # 支持自动检测
-                    target_lang=request.target_language
-                )
-                duration = time.time() - start_time
-                
-                translated_text = results[0] if results else ""
-                
-                # 检查是否翻译失败
-                if translated_text == "[TRANSLATION_FAILED]":
-                    logger.error("翻译失败")
-                    raise HTTPException(status_code=502, detail="Upstream Translation Failed")
-
-                logger.info(f"翻译完成 ({duration:.2f}s): {len(user_msg)} chars -> {len(translated_text)} chars")
-                
-                return {
-                    "id": f"chatcmpl-{int(time.time())}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": request.model,
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": translated_text
-                        },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {
-                        "prompt_tokens": len(user_msg),
-                        "completion_tokens": len(translated_text),
-                        "total_tokens": len(user_msg) + len(translated_text)
+                # 心跳检测
+                if not request.messages:
+                    logger.info("空消息列表，返回心跳成功")
+                    return {
+                        "id": "test-conn", 
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "choices": [{"index":0, "message":{"role":"assistant", "content":"OK"}, "finish_reason":"stop"}]
                     }
-                }
                 
-            except Exception as e:
-                logger.error(f"处理请求失败: {e}")
-                logger.error(traceback.format_exc())
-                raise HTTPException(status_code=500, detail=str(e))
+                # 提取用户消息
+                user_msg = next((m.content for m in reversed(request.messages) if m.role == "user"), None)
+                if not user_msg:
+                    raise HTTPException(status_code=400, detail="未找到用户消息")
+                
+                # [修复 3] 确保 translator 存在 (lifespan 有时在测试环境可能没触发)
+                if not self.translator:
+                     self.translator = AsyncTranslator(self.config)
+                
+                try:
+                    # 执行翻译
+                    # 注意：request.target_language 默认是 zh，如果插件没传该参数可能会有问题
+                    # 沉浸式翻译插件通常会在 system prompt 里写 "Translate to Chinese" 或者直接传参
+                    # 这里我们假设插件已配置正确
+                    
+                    start_time = time.time()
+                    results = await self.translator.translate_batch(
+                        texts=[user_msg],
+                        source_lang=request.source_language or "auto", # 支持自动检测
+                        target_lang=request.target_language
+                    )
+                    duration = time.time() - start_time
+                    
+                    translated_text = results[0] if results else ""
+                    
+                    # 检查是否翻译失败
+                    if translated_text == "[TRANSLATION_FAILED]":
+                        logger.error("翻译失败")
+                        raise HTTPException(status_code=502, detail="Upstream Translation Failed")
+
+                    logger.info(f"翻译完成 ({duration:.2f}s): {len(user_msg)} chars -> {len(translated_text)} chars")
+                    
+                    return {
+                        "id": f"chatcmpl-{int(time.time())}",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": request.model,
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": translated_text
+                            },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": len(user_msg),
+                            "completion_tokens": len(translated_text),
+                            "total_tokens": len(user_msg) + len(translated_text)
+                        }
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"处理请求失败: {e}")
+                    logger.error(traceback.format_exc())
+                    raise HTTPException(status_code=500, detail=str(e))
 
     def run(self, host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
         uvicorn.run(

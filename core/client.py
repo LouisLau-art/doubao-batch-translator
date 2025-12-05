@@ -9,7 +9,7 @@ import httpx
 import logging
 import os
 import re
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 
 from core.token_tracker import TokenTracker
 from core.config import DOUBAO_TRANSLATION_URL, DOUBAO_CHAT_URL
@@ -34,20 +34,21 @@ class AsyncDoubaoClient:
         # 熔断列表：记录已经彻底挂掉的模型
         self.disabled_models: Set[str] = set()
         
-        # --- 动态并发控制 ---
-        self.sem_high = asyncio.Semaphore(max_concurrent)
-        low_limit = min(60 max_concurrent) 
-        self.sem_low = asyncio.Semaphore(low_limit)
+        # --- 优化的并发控制策略 ---
+        # doubao-seed-translation-250915: RPM=5000 → 慢车道=80并发
+        # 其他高性能模型 (DeepSeek, Doubao Pro等): RPM=30000 → 快车道=500并发
+        self.sem_fast = asyncio.Semaphore(500)  # 快车道：500并发 (RPM=30000/60=500)
+        self.sem_seed = asyncio.Semaphore(80)   # 慢车道：80并发 (RPM=5000/60≈83)
         
-        logger.info(f"并发策略初始化: 高性能模式={max_concurrent}, 保守模式={low_limit}")
+        logger.info(f"🚀 并发策略: 快车道(DeepSeek/Doubao)=500, 慢车道(Seed-Translation)=80")
         
         self.source_language = source_language
         self.target_language = target_language
         self.client = httpx.AsyncClient(
-            timeout=120.0
+            timeout=120.0,
             limits=httpx.Limits(
-                max_keepalive_connections=max_concurrent, 
-                max_connections=max_concurrent + 50  # 留一点余量
+                max_keepalive_connections=500,  # 提升到500以支持快车道
+                max_connections=550  # 留一点余量
             ),
             
             # [关键修复] 告诉 httpx 忽略所有系统环境变量中的代理设置
@@ -61,11 +62,12 @@ class AsyncDoubaoClient:
 
 
     def _get_semaphore(self, model: str) -> asyncio.Semaphore:
+        """根据模型类型返回对应的信号量控制器"""
         model_lower = model.lower()
-        low_limit_keywords = ["seed-translation", "kimi"]
-        if any(kw in model_lower for kw in low_limit_keywords):
-            return self.sem_low
-        return self.sem_high
+        # 只有 seed-translation 模型使用慢车道，其他都用快车道
+        if "seed-translation" in model_lower:
+            return self.sem_seed  # 慢车道: 80并发
+        return self.sem_fast  # 快车道: 500并发
 
     async def async_translate(self, text: str, source: str = "", target: str = "en") -> str:
         if not text.strip(): return text
@@ -176,7 +178,7 @@ class AsyncDoubaoClient:
         return result_text, in_tokens, out_tokens
 
     async def _request_chat_endpoint(self, text: str, source: str, target: str, model: str) -> tuple[str, int, int]:
-        """通用 Chat 接口 (适配 DeepSeek, Kimi, Doubao Pro/1.6)"""
+        """通用 Chat 接口 (适配 DeepSeek, Doubao Pro/1.6 等高性能模型)"""
         
         payload = {
             "model": model,

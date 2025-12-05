@@ -24,11 +24,15 @@ logger = logging.getLogger(__name__)
 DOUBAO_TRANSLATION_URL = "https://ark.cn-beijing.volces.com/api/v3/responses"
 DOUBAO_CHAT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 DOUBAO_API_KEY_ENV = "ARK_API_KEY"
-DEFAULT_MAX_CONCURRENT = 150       
-DEFAULT_MAX_REQUESTS_PER_SECOND = 100.0 
+
+# 并发控制参数（优化为快慢双车道策略）
+# 快车道 (DeepSeek, Doubao Pro等): RPM=30000 → 500并发
+# 慢车道 (seed-translation): RPM=5000 → 80并发
+DEFAULT_MAX_CONCURRENT = 500      # 快车道默认并发
+DEFAULT_MAX_REQUESTS_PER_SECOND = 500.0  # 接近RPM=30000/60的理论上限
 DEFAULT_TIMEOUT = 60.0             
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_MAX_INPUT_TOKENS = 900
+DEFAULT_MAX_INPUT_TOKENS = 900    # 低于模型限制1k，留安全边距
 DEFAULT_MODEL_LIST = ["doubao-seed-translation-250915"]
 
 # 支持语言 (略，保持不变)
@@ -45,8 +49,8 @@ SUPPORTED_LANGUAGES = {
 class TranslatorConfig:
     api_key: str
     models: List[str] = field(default_factory=lambda: DEFAULT_MODEL_LIST)
-    max_concurrent: int = 30
-    max_requests_per_second: float = 20.0
+    max_concurrent: int = 500         # 快车道默认值 (内部会根据模型自动选择慢/快车道)
+    max_requests_per_second: float = 500.0  # 接近快车道理论上限
     timeout: float = 60.0
     max_retries: int = 3
     api_url: str = DOUBAO_TRANSLATION_URL
@@ -95,7 +99,7 @@ class TranslatorConfig:
         # --- 核心修改：并发参数加载 ---
         # 优先读取 MAX_CONCURRENT_REQUESTS (你的.env写法)，其次 MAX_CONCURRENT
         env_concurrent = os.getenv('MAX_CONCURRENT_REQUESTS') or os.getenv('MAX_CONCURRENT')
-        max_concurrent = int(env_concurrent) if env_concurrent else 30
+        max_concurrent = int(env_concurrent) if env_concurrent else 500  # 快车道默认值
         
         # 优先读取 REQUESTS_PER_MINUTE 计算 RPS，其次 MAX_REQUESTS_PER_SECOND
         rpm = os.getenv('REQUESTS_PER_MINUTE')
