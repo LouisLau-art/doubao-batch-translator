@@ -54,10 +54,7 @@ class DoubaoServer:
         async def lifespan(app: FastAPI):
             # 启动时初始化
             logger.info("初始化翻译器连接池...")
-            self.translator = AsyncTranslator(
-                api_key=self.config.api_key,
-                model=self.config.model
-            )
+            self.translator = AsyncTranslator(self.config)
             yield
             # 关闭时清理
             logger.info("正在关闭翻译器连接池...")
@@ -119,7 +116,7 @@ class DoubaoServer:
             
             # [修复 3] 确保 translator 存在 (lifespan 有时在测试环境可能没触发)
             if not self.translator:
-                 self.translator = AsyncTranslator(self.config.api_key, self.config.model)
+                 self.translator = AsyncTranslator(self.config)
             
             try:
                 # 执行翻译

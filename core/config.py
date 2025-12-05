@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 DOUBAO_TRANSLATION_URL = "https://ark.cn-beijing.volces.com/api/v3/responses"
 DOUBAO_CHAT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 DOUBAO_API_KEY_ENV = "ARK_API_KEY"
-
+DEFAULT_MAX_CONCURRENT = 150       
+DEFAULT_MAX_REQUESTS_PER_SECOND = 100.0 
+DEFAULT_TIMEOUT = 60.0             
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_MAX_INPUT_TOKENS = 900
 DEFAULT_MODEL_LIST = ["doubao-seed-translation-250915"]
 
 # 支持语言 (略，保持不变)
@@ -45,7 +49,9 @@ class TranslatorConfig:
     max_requests_per_second: float = 20.0
     timeout: float = 60.0
     max_retries: int = 3
-    api_url: str = DOUBAO_TRANSLATION_URL 
+    api_url: str = DOUBAO_TRANSLATION_URL
+    source_language: str = ""
+    target_language: str = "zh"
     
     @property
     def model(self) -> str:
@@ -103,6 +109,8 @@ class TranslatorConfig:
             models=models,
             max_concurrent=max_concurrent,
             max_requests_per_second=max_rps,
+            source_language=os.getenv('SOURCE_LANGUAGE', ""),
+            target_language=os.getenv('TARGET_LANGUAGE', "zh"),
         )
     
     @classmethod 

@@ -17,32 +17,48 @@ from core.config import DOUBAO_TRANSLATION_URL, DOUBAO_CHAT_URL
 logger = logging.getLogger(__name__)
 
 # 阈值：超过此长度直接使用大模型
-THRESHOLD_TOKENS_FOR_LARGE_MODEL = 700
+THRESHOLD_TOKENS_FOR_LARGE_MODEL = 800
 
 class AsyncDoubaoClient:
-    def __init__(self, api_key: str, models: List[str], max_concurrent: int = 30):
+    def __init__(self, api_key: str, models: List[str], max_concurrent: int = 150, source_language: str = "", target_language: str = "en"):
         self.api_key = api_key
         self.models = models if models else ["doubao-seed-translation-250915"]
         self.token_tracker = TokenTracker()
+        
+        # [新增] 统计字典：{模型ID: 成功次数}
+        self.model_stats = {
+            m: {'calls': 0, 'input': 0, 'output': 0} 
+            for m in self.models
+        }
         
         # 熔断列表：记录已经彻底挂掉的模型
         self.disabled_models: Set[str] = set()
         
         # --- 动态并发控制 ---
         self.sem_high = asyncio.Semaphore(max_concurrent)
-        low_limit = min(5, max_concurrent) 
+        low_limit = min(60 max_concurrent) 
         self.sem_low = asyncio.Semaphore(low_limit)
         
         logger.info(f"并发策略初始化: 高性能模式={max_concurrent}, 保守模式={low_limit}")
         
+        self.source_language = source_language
+        self.target_language = target_language
         self.client = httpx.AsyncClient(
-            timeout=90.0,
-            limits=httpx.Limits(max_keepalive_connections=max_concurrent, max_connections=max_concurrent + 10),
+            timeout=120.0
+            limits=httpx.Limits(
+                max_keepalive_connections=max_concurrent, 
+                max_connections=max_concurrent + 50  # 留一点余量
+            ),
+            
+            # [关键修复] 告诉 httpx 忽略所有系统环境变量中的代理设置
+            trust_env=False, 
+            
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json"
             }
         )
+
 
     def _get_semaphore(self, model: str) -> asyncio.Semaphore:
         model_lower = model.lower()
@@ -51,43 +67,60 @@ class AsyncDoubaoClient:
             return self.sem_low
         return self.sem_high
 
-    async def async_translate(self, text: str, source: str = "en", target: str = "zh") -> str:
+    async def async_translate(self, text: str, source: str = "", target: str = "en") -> str:
         if not text.strip(): return text
 
+        source = self.source_language
+        target = self.target_language
         est_tokens = self.token_tracker.estimate_tokens(text)
         start_index = 0
         
-        # 长文本跳过策略 (跳过第一个 Seed 模型)
         if est_tokens > THRESHOLD_TOKENS_FOR_LARGE_MODEL and len(self.models) > 1:
             if "seed" in self.models[0]:
                 start_index = 1
 
         last_exception = None
         
-        # 遍历模型池
         for i in range(start_index, len(self.models)):
             model = self.models[i]
             
-            # 熔断检查
             if model in self.disabled_models:
                 continue
 
             semaphore = self._get_semaphore(model)
             
             async with semaphore:
+                # [Check 2] 关键修复：拿到锁之后再次检查！
+                # 防止排队期间模型被其他并发请求拉黑
+                if model in self.disabled_models:
+                    continue
+
                 try:
                     retries = 2 if i == 0 else 1
                     for attempt in range(retries):
+                        if model in self.disabled_models:
+                            raise Exception("Model disabled during retry")
                         try:
                             if self._is_translation_special_model(model):
-                                return await self._request_special_endpoint(text, source, target, model)
+                                # [修改] 接收三个返回值
+                                result, in_t, out_t = await self._request_special_endpoint(text, source, target, model)
                             else:
-                                return await self._request_chat_endpoint(text, source, target, model)
+                                # [修改] 接收三个返回值
+                                result, in_t, out_t = await self._request_chat_endpoint(text, source, target, model)
+                            
+                            # [修改] 更新详细统计
+                            if model not in self.model_stats:
+                                self.model_stats[model] = {'calls': 0, 'input': 0, 'output': 0}
+                            
+                            self.model_stats[model]['calls'] += 1
+                            self.model_stats[model]['input'] += in_t
+                            self.model_stats[model]['output'] += out_t
+                            
+                            return result # 只返回文本给上层
+
                         
                         except Exception as e:
                             error_str = str(e)
-                            
-                            # 严重错误熔断
                             if "SetLimitExceeded" in error_str or "insufficient_quota" in error_str:
                                 logger.error(f"🚫 模型 {model} 额度用尽，已永久拉黑。")
                                 self.disabled_models.add(model)
@@ -132,12 +165,19 @@ class AsyncDoubaoClient:
         if response.status_code != 200:
             raise Exception(f"Seed API {response.status_code}: {response.text}")
             
-        # [新增] 成功日志
         logger.info(f"✅ [{model}] 翻译成功")
-        return response.json()["output"][0]["content"][0]["text"].strip()
+        result_text = response.json()["output"][0]["content"][0]["text"].strip()
+        
+        # [新增] 估算 Token (Seed 模型不返回 usage，手动计算)
+        in_tokens = self.token_tracker.estimate_tokens(text)
+        out_tokens = self.token_tracker.estimate_tokens(result_text)
+        
+        # [修改] 返回元组 (文本, 输入Token, 输出Token)
+        return result_text, in_tokens, out_tokens
 
-    async def _request_chat_endpoint(self, text: str, source: str, target: str, model: str) -> str:
-        """通用 Chat 接口"""
+    async def _request_chat_endpoint(self, text: str, source: str, target: str, model: str) -> tuple[str, int, int]:
+        """通用 Chat 接口 (适配 DeepSeek, Kimi, Doubao Pro/1.6)"""
+        
         payload = {
             "model": model,
             "messages": [
@@ -147,14 +187,31 @@ class AsyncDoubaoClient:
             "stream": False,
             "temperature": 0.3
         }
+
+        # [新增] 针对 Doubao 1.6 思考模型的特殊处理
+        # 强制设置 reasoning_effort 为 minimal (不思考)，变身为纯文本模型
+        if "doubao-seed-1-6" in model:
+            payload["reasoning_effort"] = "minimal"
+            # 1.6 模型通常建议稍微调高一点 max_tokens 防止截断，虽然翻译一般够用
+            # payload["max_completion_tokens"] = 4096 
+
         response = await self.client.post(DOUBAO_CHAT_URL, json=payload)
         
         if response.status_code != 200:
             raise Exception(f"Chat API {response.status_code}: {response.text}")
             
-        # [新增] 成功日志
         logger.info(f"✅ [{model}] 翻译成功")
-        return response.json()["choices"][0]["message"]["content"].strip()
+        data = response.json()
+        
+        # 解析内容
+        result_text = data["choices"][0]["message"]["content"].strip()
+        
+        # 提取 Token (兼容部分模型可能没有 usage 字段的情况)
+        usage = data.get("usage", {})
+        in_tokens = usage.get("prompt_tokens", 0)
+        out_tokens = usage.get("completion_tokens", 0)
+        
+        return result_text, in_tokens, out_tokens
 
     async def close(self):
         await self.client.aclose()
@@ -175,15 +232,21 @@ class AsyncTranslator:
             if not models and hasattr(config_or_key, 'model'):
                 models = [config_or_key.model]
                 
-        self.client = AsyncDoubaoClient(api_key, models, max_concurrent)
+        self.client = AsyncDoubaoClient(api_key, models, max_concurrent, config_or_key.source_language, config_or_key.target_language)
     
-    async def translate_batch(self, texts: List[str], source_lang: str = "en", target_lang: str = "zh") -> List[str]:
+    async def translate_batch(self, texts: List[str], source_lang: Optional[str] = None, target_lang: Optional[str] = None) -> List[str]:
+        source = source_lang if source_lang is not None else self.client.source_language
+        target = target_lang if target_lang is not None else self.client.target_language
         tasks = [
-            self.client.async_translate(text, source_lang, target_lang)
+            self.client.async_translate(text, source, target)
             for text in texts
         ]
         return await asyncio.gather(*tasks)
     
+    # [新增] 获取统计信息接口
+    def get_stats(self) -> Dict[str, int]:
+        return self.client.model_stats
+
     async def close(self):
         await self.client.close()
     
