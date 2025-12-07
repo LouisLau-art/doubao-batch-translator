@@ -27,19 +27,58 @@ logger = logging.getLogger(__name__)
 
 # Pydantic模型定义
 class Message(BaseModel):
+    """消息模型 - 兼容多种 content 格式"""
     role: str
-    content: str
+    # content 可能是字符串，也可能是数组 (如 OpenAI vision 格式)
+    content: Union[str, List[Any], None] = None
+    
+    model_config = {"extra": "allow"}  # 允许额外字段
+    
+    def get_text_content(self) -> str:
+        """智能提取文本内容"""
+        if isinstance(self.content, str):
+            return self.content
+        elif isinstance(self.content, list):
+            # 处理数组格式，如 [{"type": "text", "text": "..."}]
+            texts = []
+            for item in self.content:
+                if isinstance(item, dict):
+                    if "text" in item:
+                        texts.append(item["text"])
+                    elif "content" in item:
+                        texts.append(item["content"])
+                elif isinstance(item, str):
+                    texts.append(item)
+            return " ".join(texts)
+        return ""
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(description="模型名称")
-    messages: List[Message] = Field(description="对话消息列表")
+    model: str = Field(default="doubao-seed-translation-250915", description="模型名称")
+    messages: List[Message] = Field(default_factory=list, description="对话消息列表")
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=1000)
     stream: bool = Field(default=False)
     # 沉浸式翻译插件可能会通过 extra_body 传参，也可能不传，这里做兼容
     source_language: Optional[str] = None
     target_language: str = "zh"
+    
+    model_config = {"extra": "allow"}  # 允许额外字段，如 n, top_p 等
+
+
+# ========== 沉浸式翻译专用格式 ==========
+class ImmersiveTranslateRequest(BaseModel):
+    """沉浸式翻译插件的自定义翻译服务格式"""
+    source_lang: Optional[str] = Field(default=None, description="源语言代码")
+    target_lang: str = Field(default="zh", description="目标语言代码")
+    text_list: List[str] = Field(description="待翻译文本数组")
+    
+    model_config = {"extra": "allow"}
+
+
+class ImmersiveTranslateResponse(BaseModel):
+    """沉浸式翻译响应格式"""
+    translations: List[Dict[str, str]]
 
 
 class DoubaoServer:
@@ -101,14 +140,94 @@ class DoubaoServer:
                 }]
             }
         
+        # ========== 沉浸式翻译专用端点 ==========
+        @self.app.post("/translate", summary="沉浸式翻译专用接口")
+        @self.app.post("/translate/", include_in_schema=False)  # 同时支持带斜杠的路径
+        async def immersive_translate(request: Request):
+            """
+            沉浸式翻译插件的自定义翻译服务接口
+            请求格式: {"source_lang": "en", "target_lang": "zh", "text_list": ["hello", "world"]}
+            响应格式: {"translations": [{"detected_source_lang": "en", "text": "你好"}, ...]}
+            """
+            async with self.request_semaphore:
+                # 获取原始 JSON 数据
+                try:
+                    body = await request.json()
+                except Exception as e:
+                    logger.error(f"[沉浸式翻译] JSON解析失败: {e}")
+                    return {"translations": []}
+                
+                logger.debug(f"[沉浸式翻译] 原始请求: {json.dumps(body, ensure_ascii=False)[:200]}")
+                
+                # 灵活提取字段 (兼容不同的字段名)
+                source_lang = body.get("source_lang") or body.get("source_language") or body.get("from") or "auto"
+                target_lang = body.get("target_lang") or body.get("target_language") or body.get("to") or "zh"
+                text_list = body.get("text_list") or body.get("texts") or body.get("text") or []
+                
+                # 如果 text 是单个字符串，转为列表
+                if isinstance(text_list, str):
+                    text_list = [text_list]
+                
+                if not text_list:
+                    logger.warning(f"[沉浸式翻译] 空文本列表，原始body: {body}")
+                    return {"translations": []}
+                
+                # 确保 translator 存在
+                if not self.translator:
+                    self.translator = AsyncTranslator(self.config)
+                
+                try:
+                    start_time = time.time()
+                    logger.info(f"[沉浸式翻译] {len(text_list)} 条, {source_lang}->{target_lang}")
+                    
+                    results = await self.translator.translate_batch(
+                        texts=text_list,
+                        source_lang=source_lang,
+                        target_lang=target_lang
+                    )
+                    
+                    duration = time.time() - start_time
+                    logger.info(f"[沉浸式翻译] 完成 ({duration:.2f}s): {len(text_list)} 条")
+                    
+                    # 构造响应
+                    translations = []
+                    for i, translated in enumerate(results):
+                        translations.append({
+                            "detected_source_lang": source_lang if source_lang != "auto" else "auto",
+                            "text": translated if translated != "[TRANSLATION_FAILED]" else text_list[i]
+                        })
+                    
+                    return {"translations": translations}
+                    
+                except Exception as e:
+                    logger.error(f"[沉浸式翻译] 翻译失败: {e}")
+                    logger.error(traceback.format_exc())
+                    # 返回原文作为降级
+                    return {
+                        "translations": [
+                            {"detected_source_lang": "error", "text": t} 
+                            for t in text_list
+                        ]
+                    }
+        
         @self.app.post("/v1/chat/completions")
-        async def create_chat_completion(request: ChatCompletionRequest):
+        async def create_chat_completion(raw_request: Request):
             # [新增] 使用semaphore控制并发
             async with self.request_semaphore:
-                logger.info(f"收到请求: {request.model}")
+                # 获取原始 JSON 数据用于调试
+                try:
+                    body = await raw_request.json()
+                except Exception as e:
+                    logger.error(f"JSON解析失败: {e}")
+                    raise HTTPException(status_code=400, detail="Invalid JSON")
+                
+                logger.debug(f"[OpenAI] 原始请求: {json.dumps(body, ensure_ascii=False)[:200]}")
+                
+                model = body.get("model", "doubao-seed-translation-250915")
+                messages = body.get("messages", [])
                 
                 # 心跳检测
-                if not request.messages:
+                if not messages:
                     logger.info("空消息列表，返回心跳成功")
                     return {
                         "id": "test-conn", 
@@ -117,9 +236,27 @@ class DoubaoServer:
                         "choices": [{"index":0, "message":{"role":"assistant", "content":"OK"}, "finish_reason":"stop"}]
                     }
                 
-                # 提取用户消息
-                user_msg = next((m.content for m in reversed(request.messages) if m.role == "user"), None)
+                # 智能提取用户消息
+                user_msg = None
+                for m in reversed(messages):
+                    if m.get("role") == "user":
+                        content = m.get("content")
+                        if isinstance(content, str):
+                            user_msg = content
+                        elif isinstance(content, list):
+                            # 处理数组格式
+                            texts = []
+                            for item in content:
+                                if isinstance(item, dict) and "text" in item:
+                                    texts.append(item["text"])
+                                elif isinstance(item, str):
+                                    texts.append(item)
+                            user_msg = " ".join(texts)
+                        if user_msg:
+                            break
+                
                 if not user_msg:
+                    logger.warning(f"未找到有效用户消息，原始消息: {messages}")
                     raise HTTPException(status_code=400, detail="未找到用户消息")
                 
                 # [修复 3] 确保 translator 存在 (lifespan 有时在测试环境可能没触发)
@@ -128,15 +265,16 @@ class DoubaoServer:
                 
                 try:
                     # 执行翻译
-                    # 注意：request.target_language 默认是 zh，如果插件没传该参数可能会有问题
-                    # 沉浸式翻译插件通常会在 system prompt 里写 "Translate to Chinese" 或者直接传参
-                    # 这里我们假设插件已配置正确
+                    # 灵活提取语言参数
+                    source_lang = body.get("source_language") or body.get("source_lang") or "auto"
+                    target_lang = body.get("target_language") or body.get("target_lang") or "zh"
                     
                     start_time = time.time()
+                    logger.info(f"[OpenAI] {len(user_msg)} chars, {source_lang}->{target_lang}")
                     results = await self.translator.translate_batch(
                         texts=[user_msg],
-                        source_lang=request.source_language or "auto", # 支持自动检测
-                        target_lang=request.target_language
+                        source_lang=source_lang,
+                        target_lang=target_lang
                     )
                     duration = time.time() - start_time
                     
@@ -147,13 +285,13 @@ class DoubaoServer:
                         logger.error("翻译失败")
                         raise HTTPException(status_code=502, detail="Upstream Translation Failed")
 
-                    logger.info(f"翻译完成 ({duration:.2f}s): {len(user_msg)} chars -> {len(translated_text)} chars")
+                    logger.info(f"[OpenAI] 翻译完成 ({duration:.2f}s): {len(user_msg)} chars -> {len(translated_text)} chars")
                     
                     return {
                         "id": f"chatcmpl-{int(time.time())}",
                         "object": "chat.completion",
                         "created": int(time.time()),
-                        "model": request.model,
+                        "model": model,
                         "choices": [{
                             "index": 0,
                             "message": {

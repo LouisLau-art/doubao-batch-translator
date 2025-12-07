@@ -134,7 +134,80 @@ python main.py apply-fix --json /path/to/translated/人工翻译.json
 ```bash
 # 基本启动
 python main.py server --port 8000
+
+# 调试模式
+python main.py server --port 8000 --debug
 ```
+
+### 5. 🌐 沉浸式翻译插件配置
+
+本项目提供 HTTP API 服务，可与 [沉浸式翻译](https://immersivetranslate.com/) 浏览器插件配合使用，让你在浏览网页时直接使用豆包专用翻译模型。
+
+#### 启动服务器
+
+```bash
+python main.py server --port 8000
+```
+
+服务器启动后会监听 `http://0.0.0.0:8000`。
+
+#### 配置方式一：OpenAI 兼容模式（推荐）
+
+1. 打开沉浸式翻译设置 → 翻译服务 → 选择 **OpenAI**
+2. 配置以下参数：
+   - **API Key**: 任意填写（如 `sk-xxx`，服务器不验证）
+   - **自定义 API 地址**: `http://127.0.0.1:8000/v1/chat/completions`
+   - **模型**: `doubao-seed-translation-250915`
+3. **重要**：Prompt 配置
+   - **System Prompt**: 可留空（专用翻译模型不需要）
+   - **Prompt**: 填写 `{{text}}`（必须包含这个变量）
+   - **Multiple Prompt**: 填写 `{{text}}`
+   - **Subtitle Prompt**: 填写 `{{text}}`
+
+#### 配置方式二：自定义 API 模式
+
+1. 打开沉浸式翻译设置 → 开发者设置 → 启用 **Beta 测试功能**
+2. 翻译服务 → 选择 **自定义 API**
+3. 设置 URL: `http://127.0.0.1:8000/translate`
+
+**请求格式**（插件自动处理）:
+```json
+{
+  "source_lang": "en",
+  "target_lang": "zh",
+  "text_list": ["Hello", "World"]
+}
+```
+
+**响应格式**:
+```json
+{
+  "translations": [
+    {"detected_source_lang": "en", "text": "你好"},
+    {"detected_source_lang": "en", "text": "世界"}
+  ]
+}
+```
+
+#### API 端点说明
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 健康检查 |
+| `/v1/models` | GET | 获取可用模型列表 |
+| `/v1/chat/completions` | POST | OpenAI 兼容翻译接口 |
+| `/translate` | POST | 沉浸式翻译自定义 API 接口 |
+
+#### 常见问题
+
+**Q: 所有内容都被翻译成 "OK"？**  
+A: 检查 Prompt 配置，确保包含 `{{text}}` 变量。如果 Prompt 为空，messages 会是空数组。
+
+**Q: 出现 422 错误？**  
+A: 确认使用正确的端点。OpenAI 模式用 `/v1/chat/completions`，自定义 API 模式用 `/translate`。
+
+**Q: 连接被拒绝？**  
+A: 确保服务器正在运行，使用 `127.0.0.1` 而不是 `0.0.0.0` 作为客户端地址。
 
 ### 4. Token配额管理
 
