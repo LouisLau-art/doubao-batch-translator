@@ -21,10 +21,8 @@ doubao-batch-translator/
 ├── main.py                    # 主入口文件
 ├── requirements.txt           # 项目依赖
 ├── README.md                  # 项目说明文档
+├── models.json                # 模型配置
 ├── .env.example               # 环境变量示例
-├── .gitignore                 # Git忽略文件
-├── PROJECT_STRUCTURE.md       # 项目结构说明
-├── check_untranslated.py      # 检查未翻译内容的脚本
 │
 ├── core/                      # 核心模块
 │   ├── client.py              # 异步翻译客户端
@@ -37,8 +35,24 @@ doubao-batch-translator/
 │   ├── html_worker.py         # HTML文件处理器
 │   └── epub_worker.py         # ePub电子书处理器
 │
-└── server/                    # HTTP服务器模块
-      └── api.py               # API服务实现
+├── server/                    # HTTP服务器模块
+│   └── api.py                 # API服务实现
+│
+├── tools/                     # 工具脚本
+│   ├── check_untranslated.py  # EPUB漏译检测
+│   ├── patch_leaks.py         # 漏译精准修复
+│   ├── clean_xml.py           # XML清理工具
+│   └── manual_fix_epub.py     # EPUB手动精修助手
+│
+├── tests/                     # 测试脚本
+│   └── test_concurrency.py    # 并发测试
+│
+├── docs/                      # 文档
+│   ├── CONCURRENCY_OPTIMIZATION.md
+│   ├── EPUB_TRANSLATION_GUIDE.md
+│   └── ...
+│
+└── logs/                      # 日志目录
 ```
 
 ## 📋 环境要求

@@ -27,7 +27,7 @@ from server.api import run_server
 
 # 尝试导入质检工具
 try:
-    from check_untranslated import EPUBTranslationChecker
+    from tools.check_untranslated import EPUBTranslationChecker
 except ImportError:
     EPUBTranslationChecker = None
 

@@ -13,11 +13,14 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+# 添加项目根目录到 sys.path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # 导入现有模块
 from core.config import TranslatorConfig
 from core.client import AsyncTranslator
 from processors.html_worker import HTMLProcessor
-from check_untranslated import EPUBTranslationChecker
+from tools.check_untranslated import EPUBTranslationChecker
 
 # 配置日志
 logging.basicConfig(

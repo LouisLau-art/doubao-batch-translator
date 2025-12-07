@@ -268,8 +268,8 @@ class EPUBTranslationChecker:
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python check_untranslated.py <epub文件路径> [输出报告路径]")
-        print("示例: python check_untranslated.py /path/to/book.epub report.txt")
+        print("用法: python tools/check_untranslated.py <epub文件路径> [输出报告路径]")
+        print("示例: python tools/check_untranslated.py /path/to/book.epub report.txt")
         sys.exit(1)
     
     epub_path = sys.argv[1]
