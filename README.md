@@ -169,12 +169,23 @@ python main.py server --port 8000
 1. 打开沉浸式翻译设置 → 开发者设置 → 启用 **Beta 测试功能**
 2. 翻译服务 → 选择 **自定义 API**
 3. 设置 URL: `http://127.0.0.1:8000/translate`
+4. **支持的语言代码**（复制到沉浸式翻译配置）:
+   ```
+   zh-CN,zh-TW,en,ja,ko,de,fr,es,it,pt,ru,th,vi,ar,cs,da,fi,hr,hu,id,ms,nl,pl,ro,sv,tr,uk,no
+   ```
+
+> **语言代码自动转换**：服务器会自动将沉浸式翻译的语言代码转换为 Doubao API 支持的格式：
+> - `zh-CN` → `zh` (简体中文)
+> - `zh-TW` → `zh-Hant` (繁体中文)  
+> - `auto` → 空字符串 (自动检测)
+> - `no` → `nb` (挪威语)
+> - 不支持的语言会降级为自动检测
 
 **请求格式**（插件自动处理）:
 ```json
 {
   "source_lang": "en",
-  "target_lang": "zh",
+  "target_lang": "zh-CN",
   "text_list": ["Hello", "World"]
 }
 ```

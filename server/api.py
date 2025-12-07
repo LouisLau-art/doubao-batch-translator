@@ -130,6 +130,79 @@ class ImmersiveTranslateResponse(BaseModel):
     translations: List[Dict[str, str]]
 
 
+# ========== 语言代码映射 ==========
+# 沉浸式翻译语言代码 -> Doubao API 语言代码
+IMMERSIVE_TO_DOUBAO_LANG = {
+    # 特殊处理
+    "auto": "",          # 自动检测 -> 空字符串
+    
+    # 中文变体
+    "zh-cn": "zh",       # 简体中文
+    "zh-tw": "zh-Hant",  # 繁体中文
+    "zh": "zh",          # 兼容直接传 zh
+    
+    # 直接映射（doubao 支持的语言）
+    "en": "en",
+    "ja": "ja",
+    "ko": "ko",
+    "de": "de",
+    "fr": "fr",
+    "es": "es",
+    "it": "it",
+    "pt": "pt",
+    "ru": "ru",
+    "th": "th",
+    "vi": "vi",
+    "ar": "ar",
+    "cs": "cs",
+    "da": "da",
+    "fi": "fi",
+    "hr": "hr",
+    "hu": "hu",
+    "id": "id",
+    "ms": "ms",
+    "nl": "nl",
+    "pl": "pl",
+    "ro": "ro",
+    "sv": "sv",
+    "tr": "tr",
+    "uk": "uk",
+    
+    # 挪威语特殊映射
+    "no": "nb",          # 挪威语 -> 挪威布克莫尔语
+}
+
+# Doubao 支持的所有语言代码集合（用于快速检查）
+DOUBAO_SUPPORTED_LANGS = {
+    "zh", "zh-Hant", "en", "ja", "ko", "de", "fr", "es", "it", "pt",
+    "ru", "th", "vi", "ar", "cs", "da", "fi", "hr", "hu", "id",
+    "ms", "nb", "nl", "pl", "ro", "sv", "tr", "uk", ""
+}
+
+
+def convert_lang_code(immersive_lang: str) -> str:
+    """
+    将沉浸式翻译的语言代码转换为 Doubao API 的语言代码
+    如果不支持，返回 None
+    """
+    if not immersive_lang:
+        return ""  # 空字符串 = 自动检测
+    
+    lang_lower = immersive_lang.lower()
+    
+    # 1. 先查映射表
+    if lang_lower in IMMERSIVE_TO_DOUBAO_LANG:
+        return IMMERSIVE_TO_DOUBAO_LANG[lang_lower]
+    
+    # 2. 如果 doubao 直接支持这个代码
+    if lang_lower in DOUBAO_SUPPORTED_LANGS:
+        return lang_lower
+    
+    # 3. 不支持的语言
+    logger.warning(f"⚠️ 不支持的语言代码: {immersive_lang}，将使用自动检测")
+    return ""  # 降级为自动检测
+
+
 class DoubaoServer:
     """豆包翻译API服务器"""
     
@@ -209,9 +282,13 @@ class DoubaoServer:
                 logger.debug(f"[沉浸式翻译] 原始请求: {json.dumps(body, ensure_ascii=False)[:200]}")
                 
                 # 灵活提取字段 (兼容不同的字段名)
-                source_lang = body.get("source_lang") or body.get("source_language") or body.get("from") or "auto"
-                target_lang = body.get("target_lang") or body.get("target_language") or body.get("to") or "zh"
+                raw_source_lang = body.get("source_lang") or body.get("source_language") or body.get("from") or "auto"
+                raw_target_lang = body.get("target_lang") or body.get("target_language") or body.get("to") or "zh-CN"
                 text_list = body.get("text_list") or body.get("texts") or body.get("text") or []
+                
+                # 🔄 语言代码转换：沉浸式翻译 -> Doubao API
+                source_lang = convert_lang_code(raw_source_lang)
+                target_lang = convert_lang_code(raw_target_lang)
                 
                 # 如果 text 是单个字符串，转为列表
                 if isinstance(text_list, str):
@@ -228,7 +305,7 @@ class DoubaoServer:
                 try:
                     start_time = time.time()
                     logger.info(f"┌─ [沉浸式翻译] 开始 ───────────────────────────────")
-                    logger.info(f"│ 条数: {len(text_list)}, 语言: {source_lang} → {target_lang}")
+                    logger.info(f"│ 条数: {len(text_list)}, 语言: {raw_source_lang}({source_lang}) → {raw_target_lang}({target_lang})")
                     
                     results = await self.translator.translate_batch(
                         texts=text_list,
@@ -258,7 +335,7 @@ class DoubaoServer:
                         logger.debug(f"│ [{i+1:02d}] 译文: {final_text}")
                         
                         translations.append({
-                            "detected_source_lang": source_lang if source_lang != "auto" else "auto",
+                            "detected_source_lang": raw_source_lang if raw_source_lang != "auto" else "auto",
                             "text": final_text
                         })
                     
