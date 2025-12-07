@@ -64,8 +64,8 @@ class AsyncDoubaoClient:
     def _get_semaphore(self, model: str) -> asyncio.Semaphore:
         """根据模型类型返回对应的信号量控制器"""
         model_lower = model.lower()
-        # 只有 seed-translation 模型使用慢车道，其他都用快车道
-        if "seed-translation" in model_lower:
+        # 慢车道模型: seed-translation (RPM=5000), kimi-k2 (RPM=5000)
+        if "seed-translation" in model_lower or "kimi-k2" in model_lower:
             return self.sem_seed  # 慢车道: 80并发
         return self.sem_fast  # 快车道: 500并发
 
@@ -75,15 +75,13 @@ class AsyncDoubaoClient:
         source = self.source_language
         target = self.target_language
         est_tokens = self.token_tracker.estimate_tokens(text)
-        start_index = 0
         
-        if est_tokens > THRESHOLD_TOKENS_FOR_LARGE_MODEL and len(self.models) > 1:
-            if "seed" in self.models[0]:
-                start_index = 1
+        # [移除] 不再自动跳过 seed 模型，严格按顺序使用
+        # 优先使用第一个模型直到用完
 
         last_exception = None
         
-        for i in range(start_index, len(self.models)):
+        for i in range(len(self.models)):
             model = self.models[i]
             
             if model in self.disabled_models:
@@ -104,13 +102,11 @@ class AsyncDoubaoClient:
                             raise Exception("Model disabled during retry")
                         try:
                             if self._is_translation_special_model(model):
-                                # [修改] 接收三个返回值
                                 result, in_t, out_t = await self._request_special_endpoint(text, source, target, model)
                             else:
-                                # [修改] 接收三个返回值
                                 result, in_t, out_t = await self._request_chat_endpoint(text, source, target, model)
                             
-                            # [修改] 更新详细统计
+                            # 更新详细统计
                             if model not in self.model_stats:
                                 self.model_stats[model] = {'calls': 0, 'input': 0, 'output': 0}
                             
@@ -118,14 +114,16 @@ class AsyncDoubaoClient:
                             self.model_stats[model]['input'] += in_t
                             self.model_stats[model]['output'] += out_t
                             
-                            return result # 只返回文本给上层
+                            return result
 
                         
                         except Exception as e:
                             error_str = str(e)
                             if "SetLimitExceeded" in error_str or "insufficient_quota" in error_str:
-                                logger.error(f"🚫 模型 {model} 额度用尽，已永久拉黑。")
-                                self.disabled_models.add(model)
+                                # [修复] 只有首次拉黑时才打印日志，避免重复刷屏
+                                if model not in self.disabled_models:
+                                    logger.error(f"🚫 模型 {model} 额度用尽，已永久拉黑。")
+                                    self.disabled_models.add(model)
                                 raise e 
 
                             if attempt == retries - 1:
@@ -167,7 +165,7 @@ class AsyncDoubaoClient:
         if response.status_code != 200:
             raise Exception(f"Seed API {response.status_code}: {response.text}")
             
-        logger.info(f"✅ [{model}] 翻译成功")
+        logger.debug(f"✅ [{model}] 翻译成功")
         result_text = response.json()["output"][0]["content"][0]["text"].strip()
         
         # [新增] 估算 Token (Seed 模型不返回 usage，手动计算)
@@ -202,7 +200,7 @@ class AsyncDoubaoClient:
         if response.status_code != 200:
             raise Exception(f"Chat API {response.status_code}: {response.text}")
             
-        logger.info(f"✅ [{model}] 翻译成功")
+        logger.debug(f"✅ [{model}] 翻译成功")
         data = response.json()
         
         # 解析内容
@@ -226,15 +224,19 @@ class AsyncTranslator:
             models = ["doubao-seed-translation-250915"]
             api_key = config_or_key
             max_concurrent = 20
+            source_language = ""
+            target_language = "zh"
         else:
             api_key = config_or_key.api_key
             models = getattr(config_or_key, 'models', [])
             max_concurrent = getattr(config_or_key, 'max_concurrent', 30)
+            source_language = getattr(config_or_key, 'source_language', "")
+            target_language = getattr(config_or_key, 'target_language', "zh")
             
             if not models and hasattr(config_or_key, 'model'):
                 models = [config_or_key.model]
                 
-        self.client = AsyncDoubaoClient(api_key, models, max_concurrent, config_or_key.source_language, config_or_key.target_language)
+        self.client = AsyncDoubaoClient(api_key, models, max_concurrent, source_language, target_language)
     
     async def translate_batch(self, texts: List[str], source_lang: Optional[str] = None, target_lang: Optional[str] = None) -> List[str]:
         source = source_lang if source_lang is not None else self.client.source_language

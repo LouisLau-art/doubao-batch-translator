@@ -1,13 +1,31 @@
-node_modules
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
 .env
 node_modules/
-translated/
-.cache/
+
+# Logs
+*.log
+*.log.*
 logs/
-*.epub
+
+# Output directories (user-specific data)
+translated/
 debug_original/
 debug_translated/
 extracted_epub/
+.cache/
+
+# EPUB files (user data)
+*.epub
+
+# Temporary scripts (not part of core project)
 epub_word_counter.py
 epub_word_counter1.py
-doubao-translator.log
+
+# IDE
+.vscode/
+.idea/

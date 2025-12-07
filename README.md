@@ -88,8 +88,45 @@ python main.py html --file <your_html_file_path> --output translated.html --targ
 #### ePub电子书翻译
 
 ```bash
-# 基本用法
+# 单本翻译
 python main.py epub --file <your_epub_file_path> --output translated.epub --target-lang zh
+
+# 批量翻译整个目录 (推荐)
+python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --target-lang zh --auto-approve
+```
+
+#### 🔄 人工翻译工作流 (新功能)
+
+批量翻译完成后，如果仍有漏译，系统会自动生成 `人工翻译.json` 供您手动补充：
+
+```bash
+# 步骤1: 批量翻译 (自动生成漏译报告和JSON)
+python main.py epub --file /path/to/books/ --output /path/to/translated/ --target-lang zh --auto-approve
+
+# 步骤2: (可选) 如果需要重新生成JSON
+python main.py generate-json --dir /path/to/translated/
+
+# 步骤3: 编辑 人工翻译.json，填写您的译文
+
+# 步骤4: 将人工译文回填到EPUB
+python main.py apply-fix --json /path/to/translated/人工翻译.json
+```
+
+**JSON 格式示例**:
+```json
+{
+  "books": [
+    {
+      "epub_name": "book_translated.epub",
+      "segments": [
+        {
+          "original": "Untranslated text...",
+          "translation": ""  // ← 在这里填写您的译文
+        }
+      ]
+    }
+  ]
+}
 ```
 
 #### 启动HTTP API服务器

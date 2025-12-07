@@ -24,10 +24,10 @@ class HTMLProcessor:
         # 初始化 TokenTracker 用于估算长度
         self.token_tracker = TokenTracker()
         
-        # 适当放宽单个请求的 Token 限制，因为我们现在合并了段落
-        # doubao-seed 模型限制是 4k context (输入通常建议 < 1k-2k)
-        # 我们设为 1000 是安全的，因为 client.py 里是单请求并发
-        self.MAX_TOKEN_PER_BLOCK = 1000  
+        # [优化] 根据可用模型动态调整 Token 限制
+        # - seed-translation: 4k context, 保守用 1000
+        # - 其他模型 (DeepSeek/Doubao 1.6): 128k context, 可以用 8000
+        self.MAX_TOKEN_PER_BLOCK = self._get_max_token_limit()
         
         # 定义"块"标签：这些标签内的文本会被视为一个整体
         self.block_tags = {
@@ -40,6 +40,26 @@ class HTMLProcessor:
             'script', 'style', 'code', 'pre', 'textarea', 'noscript',
             'meta', 'link', 'title', 'head', 'svg', 'path', 'math'
         }
+    
+    def _get_max_token_limit(self) -> int:
+        """根据可用模型动态判断 Token 限制"""
+        # 检查 translator 中是否只剩下 seed-translation 模型可用
+        try:
+            client = self.translator.client
+            available_models = [m for m in client.models if m not in client.disabled_models]
+            
+            # 如果所有可用模型都是 seed-translation，使用保守限制
+            if all("seed-translation" in m for m in available_models):
+                logger.debug("检测到仅有 seed-translation 模型，使用 1000 token 限制")
+                return 1000
+            
+            # 否则使用高性能模型的宽松限制 (8k 足够覆盖绝大多数段落)
+            logger.debug("检测到高性能模型可用，使用 8000 token 限制")
+            return 8000
+            
+        except Exception:
+            # 如果无法判断，使用保守值
+            return 1000
 
     def _is_url_or_code(self, text: str) -> bool:
         """判断是否为 URL 或代码块"""
@@ -47,7 +67,7 @@ class HTMLProcessor:
         if not text: return True
         
         # 长度小于 2 的非中文通常不需要翻译
-        if len(text) < 2 and not self._is_chinese_text(text):
+        if len(text) < 1 and not self._is_chinese_text(text):
             return True
 
         # 简单 URL 特征
@@ -226,15 +246,16 @@ class HTMLProcessor:
                           target_lang: str = "zh") -> Dict[str, Any]:
         """入口函数"""
         try:
-            logger.info(f"开始处理HTML文件: {input_file}")
+            logger.debug(f"开始处理HTML文件: {input_file}")
             
             with open(input_file, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             
-            # XML 声明保留
+            # [修复] 提取 XML 声明，但在保存时检查是否已存在
             xml_decl = ""
-            m = re.match(r'^<\?xml.*?\?>', html_content)
-            if m: xml_decl = m.group(0)
+            xml_decl_match = re.match(r'^<\?xml.*?\?>', html_content)
+            if xml_decl_match: 
+                xml_decl = xml_decl_match.group(0)
 
             # 使用 lxml 容错能力更强，如果没有则 fallback
             try:
@@ -247,11 +268,15 @@ class HTMLProcessor:
             
             # 保存
             output_path = output_file or input_file
-            with open(output_path, 'w', encoding='utf-8') as f:
-                if xml_decl: f.write(xml_decl + '\n')
-                f.write(str(soup))
+            output_content = str(soup)
             
-            logger.info(f"文件处理完成，更新了 {count} 个段落")
+            # [修复] 只有当输出内容不以 XML 声明开头时，才添加
+            with open(output_path, 'w', encoding='utf-8') as f:
+                if xml_decl and not output_content.strip().startswith('<?xml'):
+                    f.write(xml_decl + '\n')
+                f.write(output_content)
+            
+            logger.debug(f"文件处理完成，更新了 {count} 个段落")
             
             return {
                 'success': True,

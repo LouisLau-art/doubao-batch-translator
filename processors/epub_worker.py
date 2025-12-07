@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ePub 电子书翻译处理器 (支持中断保存版)
+ePub 电子书翻译处理器 (增强版)
+修复 container.xml 命名空间解析问题，支持中断保存
 """
 
 import zipfile
@@ -37,6 +38,7 @@ class EpubInfo:
 class EpubProcessor:
     """ePub 电子书翻译处理器"""
     
+    # 命名空间定义 (仅作参考，解析时尽量使用忽略命名空间的策略)
     CONTAINER_NS = {'container': 'urn:oasis:names:tc:opendocument:xmlns:container'}
     OPF_NS = {'opf': 'http://www.idpf.org/2007/opf'}
     DC_NS = 'http://purl.org/dc/elements/1.1/'
@@ -104,6 +106,7 @@ class EpubProcessor:
                         finally:
                             completed_files += 1
                             if progress_callback:
+                                # 进度条范围 0.25 -> 0.95
                                 current_progress = 0.25 + (0.7 * (completed_files / total_files))
                                 progress_callback(current_progress, f"翻译进度 {completed_files}/{total_files}")
 
@@ -127,22 +130,18 @@ class EpubProcessor:
                 }
 
             except asyncio.CancelledError:
-                # 处理异步取消（Ctrl+C在某些环境下会触发这个）
                 logger.warning("\n⚠️ 任务被取消！正在保存已完成的进度...")
                 self._repack_epub(temp_dir, output_path)
                 logger.info(f"✅ 半成品已保存至: {output_path}")
                 raise
 
             except KeyboardInterrupt:
-                # [关键修复] 捕获 Ctrl+C
                 logger.warning("\n⚠️ 检测到用户中断 (Ctrl+C)！正在抢救已翻译的内容...")
                 self._repack_epub(temp_dir, output_path)
                 logger.info(f"✅ 半成品已保存至: {output_path}")
-                # 重新抛出异常，让主程序正常退出
                 raise
 
             except Exception as e:
-                # 发生其他严重错误时，也尝试保存
                 logger.error(f"发生错误: {e}，尝试保存现有进度...")
                 try:
                     self._repack_epub(temp_dir, output_path)
@@ -155,67 +154,92 @@ class EpubProcessor:
         with zipfile.ZipFile(epub_path, 'r') as zip_ref:
             zip_ref.extractall(dest_dir)
         if not os.path.exists(os.path.join(dest_dir, 'mimetype')):
-            logger.warning("警告: 未找到 mimetype 文件")
+            logger.warning("警告: 未找到 mimetype 文件，此 ePub 可能不标准")
     
     def _parse_opf(self, epub_dir: str) -> EpubInfo:
+        """
+        解析 OPF 文件 (增强鲁棒性版本)
+        不再依赖严格的 namespace 匹配，而是搜索标签名
+        """
         container_path = os.path.join(epub_dir, 'META-INF', 'container.xml')
         try:
             tree = ET.parse(container_path)
             root = tree.getroot()
-            ns = {'ns': 'urn:oasis:names:tc:opendocument:xmlns:container'}
-            rootfile = root.find('.//ns:rootfile', ns) or root.find('.//rootfile')
             
-            if rootfile is None:
-                raise ValueError("无法在 container.xml 中找到 rootfile")
+            # [关键修复] 暴力搜索 rootfile 标签，忽略命名空间
+            rootfile_elem = None
+            for elem in root.iter():
+                # ElementTree 的 tag 通常是 {namespace}tagname
+                if elem.tag.endswith('rootfile'):
+                    rootfile_elem = elem
+                    break
+            
+            if rootfile_elem is None:
+                # 打印出所有 tag 方便调试
+                tags = [e.tag for e in root.iter()]
+                raise ValueError(f"无法在 container.xml 中找到 rootfile。解析到的元素: {tags}")
                 
-            opf_rel_path = rootfile.get('full-path')
+            opf_rel_path = rootfile_elem.get('full-path')
+            if not opf_rel_path:
+                raise ValueError("rootfile 标签缺少 full-path 属性")
+                
             opf_path = os.path.join(epub_dir, opf_rel_path)
             opf_dir = os.path.dirname(opf_path)
             
         except Exception as e:
             raise Exception(f"解析 container.xml 失败: {e}")
 
+        # 解析 OPF
+        if not os.path.exists(opf_path):
+             raise FileNotFoundError(f"找不到 OPF 文件: {opf_path}")
+
         opf_tree = ET.parse(opf_path)
         opf_root = opf_tree.getroot()
         
-        root_tag = opf_root.tag
-        ns_url = root_tag.split('}')[0].strip('{') if '}' in root_tag else ''
-        ns_map = {'opf': ns_url} if ns_url else {}
+        # 不再使用严格的 namespace map
+        # root_tag = opf_root.tag
+        # ns_url = root_tag.split('}')[0].strip('{') if '}' in root_tag else ''
+        # ns_map = {'opf': ns_url} if ns_url else {}
         
         content_files = []
         toc_file = None
         toc_type = ""
         
-        items = opf_root.findall('.//opf:item', ns_map) if ns_url else opf_root.findall('.//item')
-        
-        for item in items:
-            media_type = item.get('media-type', '')
-            href = item.get('href', '')
-            properties = item.get('properties', '')
-            
-            if not href: continue
-            
-            full_path = os.path.join(opf_dir, href)
-            
-            # 识别文本
-            if 'html' in media_type.lower() or 'xhtml' in media_type.lower():
-                content_files.append(full_path)
-            
-            # 识别目录
-            if properties == 'nav' or 'ncx' in media_type:
-                toc_file = full_path
-                toc_type = 'nav' if properties == 'nav' else 'ncx'
+        # 同样使用迭代搜索，兼容性更强
+        # 查找 manifest 下的所有 item
+        for elem in opf_root.iter():
+            if elem.tag.endswith('item'):
+                media_type = elem.get('media-type', '')
+                href = elem.get('href', '')
+                properties = elem.get('properties', '')
                 
-        metadata = self._extract_metadata(opf_root, ns_map)
+                if not href: continue
+                
+                full_path = os.path.join(opf_dir, href)
+                
+                # 识别 HTML/XHTML 文本
+                if 'html' in media_type.lower() or 'xhtml' in media_type.lower():
+                    content_files.append(full_path)
+                
+                # 识别目录
+                if properties == 'nav' or 'ncx' in media_type:
+                    toc_file = full_path
+                    toc_type = 'nav' if properties == 'nav' else 'ncx'
+                
+        metadata = self._extract_metadata(opf_root)
         return EpubInfo(opf_path, opf_dir, content_files, toc_file, toc_type, metadata)
     
-    def _extract_metadata(self, opf_root, ns_map) -> Dict[str, str]:
+    def _extract_metadata(self, opf_root) -> Dict[str, str]:
+        """提取元数据 (忽略命名空间前缀)"""
         metadata = {}
-        dc_ns = {'dc': 'http://purl.org/dc/elements/1.1/'}
-        for key in ['title', 'creator', 'description']:
-            elem = opf_root.find(f'.//dc:{key}', dc_ns)
-            if elem is not None and elem.text:
-                metadata[key] = elem.text.strip()
+        for elem in opf_root.iter():
+            tag = elem.tag.lower()
+            if tag.endswith('title'):
+                metadata['title'] = elem.text.strip() if elem.text else ""
+            elif tag.endswith('creator'):
+                metadata['creator'] = elem.text.strip() if elem.text else ""
+            elif tag.endswith('description'):
+                metadata['description'] = elem.text.strip() if elem.text else ""
         return metadata
     
     async def _translate_metadata(self, epub_info: EpubInfo, source_lang: str, target_lang: str):
@@ -233,20 +257,25 @@ class EpubProcessor:
         try:
             results = await self.translator.translate_batch(texts_to_trans, source_lang, target_lang)
             
+            # 回写需要重新 parse
             tree = ET.parse(epub_info.opf_path)
             root = tree.getroot()
-            dc_ns = {'dc': 'http://purl.org/dc/elements/1.1/'}
             
-            for k, translated_text in zip(keys, results):
-                if translated_text and translated_text != "[TRANSLATION_FAILED]":
-                    elem = root.find(f'.//dc:{k}', dc_ns)
-                    if elem is not None:
-                        elem.text = translated_text
-                        logger.info(f"元数据 {k} 已翻译")
+            # 使用简单的迭代查找来回写，不依赖 namespace
+            result_map = dict(zip(keys, results))
             
+            for elem in root.iter():
+                for key in list(result_map.keys()):
+                    # 匹配标签名后缀 (如 dc:title 或 title)
+                    if elem.tag.lower().endswith(key) and result_map[key] != "[TRANSLATION_FAILED]":
+                        # 简单的防误判：只有当原文内容匹配时才替换（防止多个 creator 的情况搞混，暂简化处理）
+                        if elem.text and elem.text.strip() == epub_info.metadata[key]:
+                            elem.text = result_map[key]
+                            logger.info(f"元数据 {key} 已翻译")
+            
+            # 注册常用命名空间，防止输出时乱码 (虽然解析时不依赖，但写入时最好加上)
             ET.register_namespace('dc', "http://purl.org/dc/elements/1.1/")
-            if 'opf' in self.OPF_NS:
-                ET.register_namespace('', "http://www.idpf.org/2007/opf")
+            ET.register_namespace('opf', "http://www.idpf.org/2007/opf")
                 
             tree.write(epub_info.opf_path, encoding='utf-8', xml_declaration=True)
             
@@ -265,18 +294,21 @@ class EpubProcessor:
         try:
             tree = ET.parse(ncx_path)
             root = tree.getroot()
-            ns = {'ncx': 'http://www.daisy.org/z3986/2005/ncx/'}
             
-            text_elems = root.findall('.//ncx:text', ns)
-            texts = [e.text for e in text_elems if e.text and e.text.strip()]
+            # 查找所有 navLabel 下的 text，忽略命名空间
+            text_elems = []
+            texts = []
+            
+            for elem in root.iter():
+                if elem.tag.endswith('text') and elem.text and elem.text.strip():
+                    text_elems.append(elem)
+                    texts.append(elem.text.strip())
             
             if texts:
                 translated = await self.translator.translate_batch(texts, source_lang, target_lang)
-                idx = 0
-                for e in text_elems:
-                    if e.text and e.text.strip() and idx < len(translated):
-                        e.text = translated[idx]
-                        idx += 1
+                for elem, trans_text in zip(text_elems, translated):
+                    if trans_text and trans_text != "[TRANSLATION_FAILED]":
+                        elem.text = trans_text
                             
                 tree.write(ncx_path, encoding='utf-8', xml_declaration=True)
                 logger.info(f"NCX 目录翻译完成")

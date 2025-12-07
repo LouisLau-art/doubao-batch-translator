@@ -191,7 +191,8 @@ def run_server(host: str = "0.0.0.0", port: int = 8000, api_key: str = None, deb
             print("错误: 未提供 API Key")
             return
             
-    config = TranslatorConfig(api_key=api_key)
+    # [修复] 使用 from_args 以加载 models.json 和环境变量配置
+    config = TranslatorConfig.from_args(api_key=api_key)
     server = DoubaoServer(config)
     server.run(host=host, port=port, debug=debug)
 

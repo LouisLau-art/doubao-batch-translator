@@ -41,11 +41,23 @@ class EPUBTranslationChecker:
             return False
         
         # 过滤：纯数字
-        if text.replace('.', '').replace(',', '').isdigit():
+        if text.replace('.', '').replace(',', '').replace('-', '').replace(' ', '').isdigit():
             return False
         
         # 过滤：URL
         if re.match(r'^https?://', text) or 'www.' in text:
+            return False
+        
+        # [新增] 过滤：邮箱地址
+        if re.search(r'[\w.-]+@[\w.-]+\.\w+', text):
+            return False
+        
+        # [新增] 过滤：看起来像域名 (xxx.com, xxx.org 等)
+        if re.match(r'^[\w.-]+\.(com|org|net|io|co|edu|gov|us|uk|cn)$', text, re.I):
+            return False
+        
+        # [新增] 过滤：ISBN 编号
+        if re.search(r'ISBN[\s:-]*[\d-]{10,}', text, re.I):
             return False
         
         # 过滤：看起来像代码
@@ -53,7 +65,7 @@ class EPUBTranslationChecker:
             return False
         
         # 过滤：大量符号（可能是代码或特殊标记）
-        symbols = len(re.findall(r'[^a-zA-Z0-9\s\.,!?\-\'"()]', text))
+        symbols = len(re.findall(r'[^a-zA-Z0-9\s\.,!?\-\'\"()]', text))
         if symbols > len(text) * 0.3:  # 超过30%是特殊符号
             return False
         
@@ -62,9 +74,14 @@ class EPUBTranslationChecker:
         if english_letters < 3:
             return False
         
-        # 检查是否包含基本的英文单词
+        # [修改] 提高门槛：至少3个英文单词才认为需要翻译
         words = re.findall(r'\b[a-zA-Z]{2,}\b', text)
-        if len(words) < 2:  # 至少两个英文单词
+        if len(words) < 3:  # 从 2 改为 3
+            return False
+        
+        # [新增] 如果文本中有足够多的中文字符(超过20%)，可能是中英混合的版权信息，不算漏译
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+        if chinese_chars > 0 and (chinese_chars / len(text)) > 0.2:
             return False
         
         return True
