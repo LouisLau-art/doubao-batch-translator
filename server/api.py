@@ -9,8 +9,11 @@ import logging
 import traceback
 import json
 import time
+import os
+from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +24,52 @@ import uvicorn
 # [修复 1] 正确导入路径
 from core.client import AsyncTranslator
 from core.config import TranslatorConfig
+
+# ========== 日志配置 ==========
+def setup_logging(debug: bool = False):
+    """配置日志系统：同时输出到控制台和文件"""
+    # 创建logs目录
+    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    
+    # 日志文件名包含日期
+    log_file = log_dir / f"server_{datetime.now().strftime('%Y%m%d')}.log"
+    
+    # 创建格式化器
+    console_formatter = logging.Formatter(
+        '%(asctime)s │ %(levelname)-7s │ %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    file_formatter = logging.Formatter(
+        '%(asctime)s │ %(levelname)-7s │ %(name)s │ %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # 控制台Handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    console_handler.setFormatter(console_formatter)
+    
+    # 文件Handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)  # 文件记录所有DEBUG级别
+    file_handler.setFormatter(file_formatter)
+    
+    # 配置根日志器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    
+    # 清除已有handlers（避免重复）
+    root_logger.handlers.clear()
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # 降低第三方库日志级别
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    
+    return log_file
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +227,8 @@ class DoubaoServer:
                 
                 try:
                     start_time = time.time()
-                    logger.info(f"[沉浸式翻译] {len(text_list)} 条, {source_lang}->{target_lang}")
+                    logger.info(f"┌─ [沉浸式翻译] 开始 ───────────────────────────────")
+                    logger.info(f"│ 条数: {len(text_list)}, 语言: {source_lang} → {target_lang}")
                     
                     results = await self.translator.translate_batch(
                         texts=text_list,
@@ -187,15 +237,32 @@ class DoubaoServer:
                     )
                     
                     duration = time.time() - start_time
-                    logger.info(f"[沉浸式翻译] 完成 ({duration:.2f}s): {len(text_list)} 条")
                     
-                    # 构造响应
+                    # 构造响应并打印详细对照
                     translations = []
+                    logger.info(f"├─ 翻译结果对照 ─────────────────────────────────────")
                     for i, translated in enumerate(results):
+                        original = text_list[i]
+                        final_text = translated if translated != "[TRANSLATION_FAILED]" else original
+                        
+                        # 截断过长文本用于显示（保留完整内容到日志文件）
+                        orig_display = original[:60] + '...' if len(original) > 60 else original
+                        trans_display = final_text[:60] + '...' if len(final_text) > 60 else final_text
+                        
+                        # 控制台显示简化版
+                        logger.info(f"│ [{i+1:02d}] {orig_display}")
+                        logger.info(f"│  →  {trans_display}")
+                        
+                        # 完整版记录到DEBUG级别（会写入文件）
+                        logger.debug(f"│ [{i+1:02d}] 原文: {original}")
+                        logger.debug(f"│ [{i+1:02d}] 译文: {final_text}")
+                        
                         translations.append({
                             "detected_source_lang": source_lang if source_lang != "auto" else "auto",
-                            "text": translated if translated != "[TRANSLATION_FAILED]" else text_list[i]
+                            "text": final_text
                         })
+                    
+                    logger.info(f"└─ 完成 ({duration:.2f}s) ─────────────────────────────────")
                     
                     return {"translations": translations}
                     
@@ -270,7 +337,9 @@ class DoubaoServer:
                     target_lang = body.get("target_language") or body.get("target_lang") or "zh"
                     
                     start_time = time.time()
-                    logger.info(f"[OpenAI] {len(user_msg)} chars, {source_lang}->{target_lang}")
+                    logger.info(f"┌─ [OpenAI接口] 开始 ─────────────────────────────────")
+                    logger.info(f"│ 字符数: {len(user_msg)}, 语言: {source_lang} → {target_lang}")
+                    
                     results = await self.translator.translate_batch(
                         texts=[user_msg],
                         source_lang=source_lang,
@@ -282,10 +351,21 @@ class DoubaoServer:
                     
                     # 检查是否翻译失败
                     if translated_text == "[TRANSLATION_FAILED]":
-                        logger.error("翻译失败")
+                        logger.error("│ ❌ 翻译失败")
+                        logger.error(f"└─────────────────────────────────────────────────────")
                         raise HTTPException(status_code=502, detail="Upstream Translation Failed")
 
-                    logger.info(f"[OpenAI] 翻译完成 ({duration:.2f}s): {len(user_msg)} chars -> {len(translated_text)} chars")
+                    # 打印原文和译文对照
+                    orig_display = user_msg[:80] + '...' if len(user_msg) > 80 else user_msg
+                    trans_display = translated_text[:80] + '...' if len(translated_text) > 80 else translated_text
+                    
+                    logger.info(f"│ 原文: {orig_display}")
+                    logger.info(f"│ 译文: {trans_display}")
+                    logger.info(f"└─ 完成 ({duration:.2f}s, {len(user_msg)} → {len(translated_text)} 字符) ────")
+                    
+                    # 完整版写入日志文件
+                    logger.debug(f"[OpenAI] 完整原文: {user_msg}")
+                    logger.debug(f"[OpenAI] 完整译文: {translated_text}")
                     
                     return {
                         "id": f"chatcmpl-{int(time.time())}",
@@ -322,12 +402,20 @@ class DoubaoServer:
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8000, api_key: str = None, debug: bool = False):
+    # 初始化日志系统
+    log_file = setup_logging(debug=debug)
+    
     if not api_key:
-        import os
         api_key = os.getenv("ARK_API_KEY")
         if not api_key:
-            print("错误: 未提供 API Key")
+            logger.error("错误: 未提供 API Key")
             return
+    
+    logger.info("═" * 60)
+    logger.info("🚀 豆包翻译API服务器启动")
+    logger.info(f"📍 地址: http://{host}:{port}")
+    logger.info(f"📝 日志文件: {log_file}")
+    logger.info("═" * 60)
             
     # [修复] 使用 from_args 以加载 models.json 和环境变量配置
     config = TranslatorConfig.from_args(api_key=api_key)
