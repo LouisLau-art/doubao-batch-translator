@@ -209,6 +209,133 @@ A: 确认使用正确的端点。OpenAI 模式用 `/v1/chat/completions`，自�
 **Q: 连接被拒绝？**  
 A: 确保服务器正在运行，使用 `127.0.0.1` 而不是 `0.0.0.0` 作为客户端地址。
 
+#### 配置方式三：直接对接火山方舟 API（无需中间服务器）
+
+你可以直接在沉浸式翻译中配置火山方舟 API，无需使用本项目提供的中间服务器。这种方式更轻量，适合不需要批量翻译功能的用户。
+
+##### 配置步骤
+
+1. 打开沉浸式翻译设置 → 翻译服务 → 点击 **Edit Full User Config**
+2. 在 `translationServices` 对象中添加或修改以下配置：
+
+```jsonc
+"custom-ai-d2JnahaZ": {
+  "type": "custom-ai",
+  "extends": "custom-ai",
+  "name": "Doubao Seed Translation",
+  "APIKEY": "你的 APIKey",
+  "apiUrl": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "model": "doubao-seed-translation-250915",
+  "group": "custom",
+  "visible": true,
+  "limit": "80",
+  "maxTextLengthPerRequest": "1000", // 按照模型最大输入Token设定
+  "maxTextGroupLengthPerRequest": "1", // 每次只支持翻一个text
+  "maxTextGroupLengthPerRequestForSubtitle": "1",
+  "prompt": "{{text}}", // 必填，占位符
+  "systemPrompt": "",
+  "multiplePrompt": "{{text}}",
+  "subtitlePrompt": "{{text}}",
+  "headerConfigs": {
+    "Authorization": "Bearer {{APIKEY}}",
+    "Content-Type": "application/json"
+  },
+  "bodyConfigs": {
+    "model": "doubao-seed-translation-250915",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{{text}}",
+            "translation_options": {
+              "target_language": "{{to}}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> 如果你希望显式指定 `source_language`，可以在 `translation_options` 中添加 `"source_language": "{{from}}"`。
+
+3. 保存配置后，选择 **Doubao Seed Translation** 作为当前翻译服务
+
+##### 功能验证方法
+
+1. 打开任意网页
+2. 确保已切换到「Doubao Seed Translation」为当前翻译服务
+3. 打开 DevTools → network 观察请求结构是否如下：
+
+```json
+POST https://ark.cn-beijing.volces.com/api/v3/responses
+
+{
+  "model": "doubao-seed-translation-250915",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Hello world",
+          "translation_options": {
+            "target_language": "zh"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+##### 问题排查清单
+
+| 问题 | 原因 | 解决方法 |
+|------|------|---------|
+| 翻译失败或未调用 | Body格式不符，或没带 header | 使用上面的 bodyConfig 与 headerConfig 模板 |
+| 多段落被截断或失败 | 模型不支持聚合段落 | 设置 `"maxTextGroupLengthPerRequest": "1"` |
+| 输出断行、排版偏移 | CSS 被原网页强制 | 用 `globalStyles` 加 `-webkit-line-clamp: unset;` |
+| 插件未调用你自定义服务 | translationService 名填错 | 确保 `"translationService": "custom-ai-d2JnahaZ"` |
+
+##### 进阶功能拓展建议（可选）
+
+1. **匹配特定语言自动使用翻译模型**
+   ```json
+   "translationLanguagePattern": {
+     "matches": ["en", "ja"]
+   }
+   ```
+
+2. **显示主题样式**
+   ```json
+   "translationTheme": "underline"
+   ```
+
+   或者为不同网站设置：
+   ```json
+   "translationThemePatterns": {
+     "highlight": {
+       "matches": ["microsoft.com"]
+     }
+   }
+   ```
+
+3. **避免未配置项出现在 UI 面板中**
+   ```json
+   "showUnconfiguredTranslationServiceInPopup": false,
+   ```
+
+4. **绑定使用该服务用于全部网页或特定网页**
+   ```json
+   "translationUrlPattern": {
+     "matches": [ "*" ] // 或指定网站如 "twitter.com"
+   }
+   ```
+
 ### 4. Token配额管理
 
 - **每日2M免费额度监控**: 实时跟踪token使用量，防止超额
