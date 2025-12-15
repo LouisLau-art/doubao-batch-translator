@@ -16,8 +16,7 @@ from core.config import DOUBAO_TRANSLATION_URL, DOUBAO_CHAT_URL
 
 logger = logging.getLogger(__name__)
 
-# 阈值：超过此长度直接使用大模型
-THRESHOLD_TOKENS_FOR_LARGE_MODEL = 800
+
 
 class AsyncDoubaoClient:
     def __init__(self, api_key: str, models: List[str], max_concurrent: int = 150, source_language: str = "", target_language: str = "en"):
@@ -74,10 +73,6 @@ class AsyncDoubaoClient:
 
         source = self.source_language
         target = self.target_language
-        est_tokens = self.token_tracker.estimate_tokens(text)
-        
-        # [移除] 不再自动跳过 seed 模型，严格按顺序使用
-        # 优先使用第一个模型直到用完
 
         last_exception = None
         
@@ -118,13 +113,26 @@ class AsyncDoubaoClient:
 
                         
                         except Exception as e:
-                            error_str = str(e)
-                            if "SetLimitExceeded" in error_str or "insufficient_quota" in error_str:
-                                # [修复] 只有首次拉黑时才打印日志，避免重复刷屏
+                            error_str = str(e).lower()
+                            
+                            # [情况1] 额度用尽 - 永久拉黑该模型
+                            if "setlimitexceeded" in error_str or "insufficient_quota" in error_str:
                                 if model not in self.disabled_models:
                                     logger.error(f"🚫 模型 {model} 额度用尽，已永久拉黑。")
                                     self.disabled_models.add(model)
-                                raise e 
+                                raise e
+                            
+                            # [情况2] 输入过长 - 仅本次请求降级，不拉黑模型
+                            # 实测 doubao-seed-translation 超限时返回: 400 InvalidParameter
+                            # 其他可能的关键词: context_length_exceeded, too long, max_tokens
+                            token_limit_keywords = [
+                                "invalidparameter",  # doubao-seed-translation 实际返回
+                                "context_length", "too long", "token limit", 
+                                "max_token", "length exceed", "input too long"
+                            ]
+                            if any(kw in error_str for kw in token_limit_keywords):
+                                logger.warning(f"⚠️ [{model}] 输入过长 ({len(text)} chars)，降级到下一个模型...")
+                                raise e  # 抛出让外层 continue 到下一个模型
 
                             if attempt == retries - 1:
                                 raise e

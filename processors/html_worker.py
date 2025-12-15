@@ -24,9 +24,8 @@ class HTMLProcessor:
         # 初始化 TokenTracker 用于估算长度
         self.token_tracker = TokenTracker()
         
-        # [优化] 根据可用模型动态调整 Token 限制
-        # - seed-translation: 4k context, 保守用 1000
-        # - 其他模型 (DeepSeek/Doubao 1.6): 128k context, 可以用 8000
+        # [兜底] 超长段落切分阈值 - 防止单个段落过大导致所有模型都失败
+        # 现采用"乐观尝试 + 错误降级"策略，seed 模型失败会自动降级到普通模型
         self.MAX_TOKEN_PER_BLOCK = self._get_max_token_limit()
         
         # 定义"块"标签：这些标签内的文本会被视为一个整体
@@ -42,24 +41,16 @@ class HTMLProcessor:
         }
     
     def _get_max_token_limit(self) -> int:
-        """根据可用模型动态判断 Token 限制"""
-        # 检查 translator 中是否只剩下 seed-translation 模型可用
-        try:
-            client = self.translator.client
-            available_models = [m for m in client.models if m not in client.disabled_models]
-            
-            # 如果所有可用模型都是 seed-translation，使用保守限制
-            if all("seed-translation" in m for m in available_models):
-                logger.debug("检测到仅有 seed-translation 模型，使用 1000 token 限制")
-                return 1000
-            
-            # 否则使用高性能模型的宽松限制 (8k 足够覆盖绝大多数段落)
-            logger.debug("检测到高性能模型可用，使用 8000 token 限制")
-            return 8000
-            
-        except Exception:
-            # 如果无法判断，使用保守值
-            return 1000
+        """
+        获取单个块的最大 Token 限制。
+        
+        [优化] 现在采用"乐观尝试 + 错误降级"策略：
+        - 不再根据 seed-translation 的限制预先切分
+        - 使用宽松的限制值，如果真的超限，client.py 会自动降级到普通模型
+        - 这个值主要作为兜底，防止超级长的段落导致所有模型都失败
+        """
+        # 使用 8000 作为兜底值 (普通模型 128k context 绰绰有余)
+        return 8000
 
     def _is_url_or_code(self, text: str) -> bool:
         """判断是否为 URL 或代码块"""
