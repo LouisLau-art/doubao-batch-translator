@@ -29,3 +29,14 @@ epub_word_counter1.py
 # IDE
 .vscode/
 .idea/
+
+# Agent/AI tool configurations (personal/local)
+.gemini/
+.specify/
+.agent/
+
+# Exported conversation history (not part of project)
+PleaseReadHere/
+
+# Temporary notes
+optimizing_doubao_api.md
