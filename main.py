@@ -23,6 +23,7 @@ from core.client import AsyncTranslator
 from processors.json_worker import JSONProcessor
 from processors.html_worker import HTMLProcessor
 from processors.epub_worker import EpubProcessor
+from processors.md_worker import MarkdownProcessor
 from server.api import run_server
 
 # 尝试导入质检工具
@@ -103,6 +104,13 @@ class MainCLI:
         html_parser.add_argument("--output", "-o", help="输出文件")
         html_parser.add_argument("--source-lang", help="源语言")
         html_parser.add_argument("--target-lang", "-t", default="zh", help="目标语言")
+        
+        # Markdown翻译命令
+        md_parser = subparsers.add_parser("md", help="Markdown文件翻译")
+        md_parser.add_argument("--file", "-f", required=True, help="输入文件")
+        md_parser.add_argument("--output", "-o", help="输出文件")
+        md_parser.add_argument("--source-lang", help="源语言")
+        md_parser.add_argument("--target-lang", "-t", default="zh", help="目标语言")
         
         # ePub翻译命令
         epub_parser = subparsers.add_parser("epub", help="ePub电子书翻译")
@@ -676,6 +684,19 @@ class MainCLI:
                 logger.error(f"HTML翻译失败: {e}")
                 sys.exit(1)
 
+    async def _handle_md_command(self, args):
+        logger.info(f"开始Markdown翻译: {args.file}")
+        config = self._get_config(args)
+        async with self._create_translator(config) as translator:
+            processor = MarkdownProcessor(translator)
+            try:
+                result = await processor.translate_file(args.file, args.output, args.source_lang, args.target_lang)
+                logger.info(f"Markdown翻译完成! 已翻译: {result.get('translated_count', 0)} 个文本段")
+                self._print_stats(translator)
+            except Exception as e:
+                logger.error(f"Markdown翻译失败: {e}")
+                sys.exit(1)
+
     def _handle_server_command(self, args):
         run_server(host=args.host, port=args.port, api_key=args.api_key, debug=args.debug)
 
@@ -835,6 +856,7 @@ class MainCLI:
         try:
             if args.command == "json": asyncio.run(self._handle_json_command(args))
             elif args.command == "html": asyncio.run(self._handle_html_command(args))
+            elif args.command == "md": asyncio.run(self._handle_md_command(args))
             elif args.command == "epub": asyncio.run(self._handle_epub_command(args))
             elif args.command == "server": self._handle_server_command(args)
             elif args.command == "apply-fix": self._handle_applyfix_command(args)

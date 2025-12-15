@@ -11,6 +11,10 @@ pydantic>=2.5.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 
+# Markdown解析 (processors/md_worker.py)
+mistune>=3.0.0
+pyyaml>=6.0
+
 # 基础工具
 python-dotenv>=1.0.0            # 读取 .env 配置
 aiofiles>=23.0.0                # 异步文件操作
