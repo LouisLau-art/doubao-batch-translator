@@ -96,25 +96,25 @@ python main.py json --file <your_json_file_path>
 #### HTML文件翻译
 
 ```bash
-# 基本用法
-python main.py html --file <your_html_file_path> --output translated.html --target-lang zh
+# 基本用法 (默认翻译成中文)
+python main.py html --file <your_html_file_path> --output translated.html
 ```
 
 #### ePub电子书翻译
 
 ```bash
-# 单本翻译
-python main.py epub --file <your_epub_file_path> --output translated.epub --target-lang zh
+# 单本翻译 (默认翻译成中文)
+python main.py epub --file <your_epub_file_path> --output translated.epub
 
 # 批量翻译整个目录 (推荐)
-python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --target-lang zh --auto-approve
+python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --auto-approve
 ```
 
 #### Markdown文件翻译
 
 ```bash
-# 基本用法
-python main.py md --file README.md --output README_zh.md --target-lang zh
+# 基本用法 (默认翻译成中文)
+python main.py md --file README.md --output README_zh.md
 ```
 
 **特性**:
@@ -128,8 +128,8 @@ python main.py md --file README.md --output README_zh.md --target-lang zh
 批量翻译完成后，如果仍有漏译，系统会自动生成 `人工翻译.json` 供您手动补充：
 
 ```bash
-# 步骤1: 批量翻译 (自动生成漏译报告和JSON)
-python main.py epub --file /path/to/books/ --output /path/to/translated/ --target-lang zh --auto-approve
+# 步骤1: 批量翻译 (自动生成漏译报告和JSON，默认翻译成中文)
+python main.py epub --file /path/to/books/ --output /path/to/translated/ --auto-approve
 
 # 步骤2: (可选) 如果需要重新生成JSON
 python main.py generate-json --dir /path/to/translated/
