@@ -33,7 +33,8 @@ doubao-batch-translator/
 ├── processors/                # 处理器模块
 │   ├── json_worker.py         # JSON文件处理器
 │   ├── html_worker.py         # HTML文件处理器
-│   └── epub_worker.py         # ePub电子书处理器
+│   ├── epub_worker.py         # ePub电子书处理器
+│   └── md_worker.py           # Markdown文件处理器
 │
 ├── server/                    # HTTP服务器模块
 │   └── api.py                 # API服务实现
@@ -108,6 +109,19 @@ python main.py epub --file <your_epub_file_path> --output translated.epub --targ
 # 批量翻译整个目录 (推荐)
 python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --target-lang zh --auto-approve
 ```
+
+#### Markdown文件翻译
+
+```bash
+# 基本用法
+python main.py md --file README.md --output README_zh.md --target-lang zh
+```
+
+**特性**:
+- ✅ 代码块和行内代码保持不变
+- ✅ 链接URL保持不变，仅翻译链接文本
+- ✅ YAML Frontmatter 智能处理（仅翻译 title、description、summary 等字段）
+- ✅ 支持批量翻译
 
 #### 🔄 人工翻译工作流 (新功能)
 
@@ -405,6 +419,13 @@ POST https://ark.cn-beijing.volces.com/api/v3/responses
 
 - `--file, -f`: 输入文件（必需）
 - `--output, -o`: 输出文件（必需）
+- `--source-lang`: 源语言
+- `--target-lang, -t`: 目标语言（默认: zh）
+
+#### Markdown翻译参数
+
+- `--file, -f`: 输入文件（必需）
+- `--output, -o`: 输出文件
 - `--source-lang`: 源语言
 - `--target-lang, -t`: 目标语言（默认: zh）
 
