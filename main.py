@@ -107,10 +107,11 @@ class MainCLI:
         
         # Markdown翻译命令
         md_parser = subparsers.add_parser("md", help="Markdown文件翻译")
-        md_parser.add_argument("--file", "-f", required=True, help="输入文件")
-        md_parser.add_argument("--output", "-o", help="输出文件")
+        md_parser.add_argument("--file", "-f", required=True, help="输入文件或文件夹")
+        md_parser.add_argument("--output", "-o", help="输出文件或文件夹")
         md_parser.add_argument("--source-lang", help="源语言")
         md_parser.add_argument("--target-lang", "-t", default="zh", help="目标语言")
+        md_parser.add_argument("--recursive", "-r", action="store_true", help="递归翻译文件夹中的所有Markdown文件")
         
         # ePub翻译命令
         epub_parser = subparsers.add_parser("epub", help="ePub电子书翻译")
@@ -687,15 +688,98 @@ class MainCLI:
     async def _handle_md_command(self, args):
         logger.info(f"开始Markdown翻译: {args.file}")
         config = self._get_config(args)
+        input_path = Path(args.file)
+        
+        # --- 场景 A: 单文件 ---
+        if input_path.is_file():
+            await self._process_single_md(input_path, args, config)
+        
+        # --- 场景 B: 文件夹 (批量) ---
+        elif input_path.is_dir():
+            await self._process_batch_md(input_path, args, config)
+            
+        else:
+            logger.error(f"输入路径不存在: {args.file}")
+            sys.exit(1)
+    
+    async def _process_single_md(self, input_path: Path, args, config):
+        """处理单个Markdown文件的翻译"""
+        # 确定输出路径
+        target_lang = args.target_lang or "zh"
+        if args.output:
+            output_path = Path(args.output)
+            if output_path.is_dir():
+                # 如果输出是目录，则自动命名输出文件
+                output_filename = f"{input_path.stem}_{target_lang}{input_path.suffix}"
+                output_path = output_path / output_filename
+        else:
+            # 默认输出文件名
+            output_path = input_path.with_name(f"{input_path.stem}_{target_lang}{input_path.suffix}")
+        
+        logger.info(f"翻译文件: {input_path.name} -> {output_path}")
+        
         async with self._create_translator(config) as translator:
             processor = MarkdownProcessor(translator)
             try:
-                result = await processor.translate_file(args.file, args.output, args.source_lang, args.target_lang)
+                result = await processor.translate_file(
+                    str(input_path), str(output_path), args.source_lang, args.target_lang
+                )
                 logger.info(f"Markdown翻译完成! 已翻译: {result.get('translated_count', 0)} 个文本段")
                 self._print_stats(translator)
             except Exception as e:
                 logger.error(f"Markdown翻译失败: {e}")
                 sys.exit(1)
+    
+    async def _process_batch_md(self, input_dir: Path, args, config):
+        """处理文件夹中的Markdown文件翻译（支持递归）"""
+        # 确定输出目录
+        if args.output:
+            output_dir = Path(args.output)
+            output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            output_dir = input_dir / "translated"
+            output_dir.mkdir(exist_ok=True)
+        
+        # 查找Markdown文件
+        if args.recursive:
+            md_files = list(input_dir.rglob("*.md"))
+        else:
+            md_files = list(input_dir.glob("*.md"))
+            
+        # 排除已翻译的文件
+        md_files = [f for f in md_files if "_translated" not in f.name]
+        
+        if not md_files:
+            logger.error(f"在 {input_dir} 中未找到 Markdown 文件")
+            return
+            
+        logger.info(f"发现 {len(md_files)} 个 Markdown 文件")
+        
+        # 逐个翻译文件
+        for idx, md_file in enumerate(md_files, 1):
+            logger.info(f"[{idx}/{len(md_files)}] 正在翻译: {md_file}")
+            
+            # 构建输出路径，保留原始目录结构
+            relative_path = md_file.relative_to(input_dir)
+            output_file = output_dir / relative_path
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 自动添加目标语言后缀
+            target_lang = args.target_lang or "zh"
+            output_file = output_file.with_name(f"{output_file.stem}_{target_lang}{output_file.suffix}")
+            
+            async with self._create_translator(config) as translator:
+                processor = MarkdownProcessor(translator)
+                try:
+                    await processor.translate_file(
+                        str(md_file), str(output_file), args.source_lang, args.target_lang
+                    )
+                    self._print_stats(translator)
+                except Exception as e:
+                    logger.error(f"翻译 {md_file.name} 失败: {e}")
+                    continue
+        
+        logger.info(f"批量翻译完成! 输出目录: {output_dir}")
 
     def _handle_server_command(self, args):
         run_server(host=args.host, port=args.port, api_key=args.api_key, debug=args.debug)

@@ -115,13 +115,28 @@ python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --aut
 ```bash
 # 基本用法 (默认翻译成中文)
 python main.py md --file README.md --output README_zh.md
+
+# 翻译整个目录下的Markdown文件
+python main.py md --file /path/to/md/folder --output /path/to/output/folder
+
+# 递归翻译目录下所有Markdown文件（包括子目录）
+python main.py md --file /path/to/md/folder --output /path/to/output/folder --recursive
+
+# 使用简写参数
+python main.py md -f /path/to/md/folder -o /path/to/output/folder -r
+
+# 翻译到其他语言
+python main.py md --file README.md --output README_en.md --target-lang en
 ```
 
 **特性**:
+
 - ✅ 代码块和行内代码保持不变
 - ✅ 链接URL保持不变，仅翻译链接文本
 - ✅ YAML Frontmatter 智能处理（仅翻译 title、description、summary 等字段）
-- ✅ 支持批量翻译
+- ✅ 支持批量翻译整个目录
+- ✅ 支持递归翻译子目录中的文件
+- ✅ 自动根据目标语言生成文件名后缀（如 _zh, _en, _ja 等）
 
 #### 🔄 人工翻译工作流 (新功能)
 
@@ -196,8 +211,11 @@ python main.py server --port 8000
 #### 配置方式二：自定义 API 模式
 
 1. 打开沉浸式翻译设置 → 开发者设置 → 启用 **Beta 测试功能**
+
 2. 翻译服务 → 选择 **自定义 API**
+
 3. 设置 URL: `http://127.0.0.1:8000/translate`
+
 4. **支持的语言代码**（复制到沉浸式翻译配置）:
    
    ```
@@ -424,10 +442,11 @@ POST https://ark.cn-beijing.volces.com/api/v3/responses
 
 #### Markdown翻译参数
 
-- `--file, -f`: 输入文件（必需）
-- `--output, -o`: 输出文件
+- `--file, -f`: 输入文件或文件夹（必需）
+- `--output, -o`: 输出文件或文件夹
 - `--source-lang`: 源语言
 - `--target-lang, -t`: 目标语言（默认: zh）
+- `--recursive, -r`: 递归翻译文件夹中的所有Markdown文件
 
 #### 服务器参数
 
