@@ -1,0 +1,20 @@
+[Unit]
+Description=Doubao Batch Translator API Server
+After=network.target
+
+[Service]
+Type=simple
+User=louis
+WorkingDirectory=/home/louis/doubao-batch-translator
+ExecStart=/usr/bin/python3 /home/louis/doubao-batch-translator/main.py server --port 8000
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=doubao-translator
+
+# 读取环境变量文件
+EnvironmentFile=/home/louis/doubao-batch-translator/.env
+
+[Install]
+WantedBy=multi-user.target

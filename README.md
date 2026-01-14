@@ -552,6 +552,46 @@ export ARK_API_KEY=your_api_key
 pip install -r requirements.txt
 ```
 
+### 服务管理（Linux 系统）
+
+#### 使用 systemd 服务（推荐用于生产环境）
+
+本项目提供了 systemd 服务配置，可实现开机自启和后台运行。
+
+```bash
+cd /home/louis/doubao-batch-translator
+
+# 1. 给管理脚本添加执行权限
+chmod +x service-management.sh
+
+# 2. 安装并启动服务（包括开机自启）
+./service-management.sh install
+
+# 3. 验证服务状态
+./service-management.sh status
+
+# 4. 查看实时日志
+./service-management.sh logs
+```
+
+#### 常用管理命令
+
+```bash
+./service-management.sh start    # 启动服务
+./service-management.sh stop     # 停止服务
+./service-management.sh restart  # 重启服务
+./service-management.sh enable   # 启用开机自启
+./service-management.sh disable  # 禁用开机自启
+./service-management.sh uninstall# 卸载服务
+```
+
+#### 服务配置说明
+
+- 服务文件：`doubao-translator.service` - systemd 服务配置
+- 管理脚本：`service-management.sh` - 便捷的服务管理工具
+- 环境变量：读取 `.env` 文件中的配置
+- 日志：记录到 systemd journal，可通过 `./service-management.sh logs` 查看
+
 ### 项目结构说明
 
 详细的项目结构说明请参考 [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) 文件。
