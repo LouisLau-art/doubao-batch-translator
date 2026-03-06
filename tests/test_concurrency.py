@@ -9,7 +9,7 @@ import httpx
 import time
 from typing import List
 
-async def test_translation(client: httpx.AsyncClient, text: str, test_id: int) -> dict:
+async def perform_translation(client: httpx.AsyncClient, text: str, test_id: int) -> dict:
     """发送单个翻译请求"""
     start_time = time.time()
     try:
@@ -78,7 +78,7 @@ async def run_concurrency_test(num_requests: int = 100, concurrency: int = 80):
         
         async def limited_test(test_id: int, text: str):
             async with semaphore:
-                return await test_translation(client, text, test_id)
+                return await perform_translation(client, text, test_id)
         
         # 开始测试
         start_time = time.time()
