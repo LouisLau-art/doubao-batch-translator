@@ -1,13 +1,19 @@
 # 豆包批量翻译器 (Doubao Batch Translator)
 
-一个高效的Python异步命令行翻译工具，基于"一核多壳"架构设计，支持JSON文件翻译、HTML文件翻译和HTTP API服务。
+[![CI](https://github.com/LouisLau-art/doubao-batch-translator/actions/workflows/ci.yml/badge.svg)](https://github.com/LouisLau-art/doubao-batch-translator/actions/workflows/ci.yml)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/github/license/LouisLau-art/doubao-batch-translator)](./LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/LouisLau-art/doubao-batch-translator?style=social)](https://github.com/LouisLau-art/doubao-batch-translator/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/LouisLau-art/doubao-batch-translator)](https://github.com/LouisLau-art/doubao-batch-translator/commits)
+
+一个面向 Doubao/ARK 的高吞吐批量翻译工具，基于 Python asyncio，支持 ePub/Markdown/HTML/JSON 翻译、自动模型降级、每模型 RPM 限速与漏译修复闭环。
 
 ## 🚀 核心特性
 
 ### 架构特点
 
 - **一核多壳设计**: 核心`AsyncTranslator`提供统一翻译能力，外层处理器适配不同场景
-- **快慢双车道并发**: 智能识别模型性能，自动分流到快车道(500并发)或慢车道(80并发)
+- **快慢双车道并发 + 每模型限速**: 自动分流到快车道/慢车道，并按模型 RPM 精确限流
   - 🐢 慢车道：`doubao-seed-translation-250915` (RPM=5000, 免费额度)
   - 🚀 快车道：`DeepSeek`, `Doubao Pro` 等 (RPM=30000, 高性能)
 - **异步并发**: 基于asyncio的高效异步处理，支持高并发翻译
@@ -22,6 +28,7 @@ doubao-batch-translator/
 ├── requirements.txt           # 项目依赖
 ├── README.md                  # 项目说明文档
 ├── models.json                # 模型配置
+├── model_rate_limits.json     # 每模型 RPM 限速配置
 ├── .env.example               # 环境变量示例
 │
 ├── core/                      # 核心模块
@@ -43,10 +50,14 @@ doubao-batch-translator/
 │   ├── check_untranslated.py  # EPUB漏译检测
 │   ├── patch_leaks.py         # 漏译精准修复
 │   ├── clean_xml.py           # XML清理工具
-│   └── manual_fix_epub.py     # EPUB手动精修助手
+│   ├── manual_fix_epub.py     # EPUB手动精修助手
+│   ├── export_ark_models.py   # 导出 ARK 模型清单与能力参数
+│   └── capture_model_plaza_api.py  # 抓取控制台模型广场 XHR/FETCH JSON
 │
 ├── tests/                     # 测试脚本
-│   └── test_concurrency.py    # 并发测试
+│   ├── test_concurrency.py    # 并发测试
+│   ├── test_best_practices.py # 回归测试（语言参数、并发、API异常）
+│   └── test_export_ark_models.py # 模型导出脚本测试
 │
 ├── docs/                      # 文档
 │   ├── CONCURRENCY_OPTIMIZATION.md
@@ -172,6 +183,37 @@ python main.py apply-fix --json /path/to/translated/人工翻译.json
   ]
 }
 ```
+
+#### 🧭 模型清单导出与模型广场抓取
+
+如果你想查看 Ark Runtime 可见模型及其参数（例如 token 限制、结构化输出、函数调用、批处理能力），可使用：
+
+```bash
+# 导出运行时模型列表（JSON）
+python tools/export_ark_models.py --active-only --pretty --output ark_models.json
+
+# 导出为 CSV，便于筛选和排序
+python tools/export_ark_models.py --format csv --output ark_models.csv
+
+# 仅看文本生成类模型
+python tools/export_ark_models.py --task-type TextGeneration --format md --output ark_models.md
+```
+
+如果你要抓取「火山引擎控制台模型广场」里更细的参数（通常需要登录态）：
+
+```bash
+# 首次使用需要安装 Playwright
+pip install playwright
+playwright install chromium
+
+# 打开浏览器并捕获模型广场相关 XHR/FETCH 返回
+python tools/capture_model_plaza_api.py --wait-seconds 90 --output-dir model_plaza_capture
+```
+
+脚本会输出：
+- `index.json`: 全部捕获响应索引
+- `model_candidates.json`: 疑似模型列表接口的候选索引
+- `*.json`: 每条接口响应原始 JSON
 
 #### 启动HTTP API服务器
 
@@ -508,7 +550,7 @@ export ARK_API_KEY=your_api_key
 ]
 ```
 
-系统会自动根据模型类型选择对应的并发策略，无需手动配置。详见 [CONCURRENCY_OPTIMIZATION.md](CONCURRENCY_OPTIMIZATION.md)
+系统会自动根据模型类型选择并发策略，并结合 `model_rate_limits.json` / `MODEL_RPM_OVERRIDES` 做每模型 RPM 限速。详见 [CONCURRENCY_OPTIMIZATION.md](CONCURRENCY_OPTIMIZATION.md)
 
 ## 🔄 断点续传机制
 
