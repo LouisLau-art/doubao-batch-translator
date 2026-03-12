@@ -49,7 +49,8 @@ doubao-batch-translator/
 │   └── api.py                   # FastAPI服务器
 ├── examples/                     # 示例文件
 ├── main.py                       # 统一入口 ⭐
-├── requirements.txt              # Python依赖 ⭐
+├── pyproject.toml                # 项目依赖与元数据 ⭐
+├── uv.lock                       # uv 锁文件 ⭐
 └── README.md                     # 详细文档 ⭐
 ```
 
@@ -62,7 +63,7 @@ doubao-batch-translator/
 # 保留src/目录作为参考，但核心功能迁移到新架构
 
 # 2. 安装新版本依赖
-pip install -r requirements.txt
+uv sync --dev
 
 # 3. 设置API密钥
 export ARK_API_KEY=your_api_key_here
@@ -79,7 +80,7 @@ python translator.py translation_work.json --output translated.json
 
 **新方式:**
 ```bash
-python main.py json --file translation_work.json --output translated.json
+uv run python main.py json --file translation_work.json --output translated.json
 ```
 
 **向后兼容:**
@@ -93,7 +94,7 @@ python main.py json --file translation_work.json --output translated.json
 
 **新方式:**
 ```bash
-python main.py html --file input.html --output translated.html
+uv run python main.py html --file input.html --output translated.html
 ```
 
 **改进:**
@@ -108,7 +109,7 @@ python main.py html --file input.html --output translated.html
 
 **新方式:**
 ```bash
-python main.py server --port 8000
+uv run python main.py server --port 8000
 ```
 
 **改进:**
@@ -164,7 +165,7 @@ python translator.py file.json --concurrent 5
 export ARK_API_KEY=key
 export MAX_CONCURRENT=5
 export MAX_REQUESTS_PER_SECOND=50.0
-python main.py json --file file.json --max-concurrent 3 --max-rps 30
+uv run python main.py json --file file.json --max-concurrent 3 --max-rps 30
 ```
 
 ### 步骤4: 测试验证
@@ -173,13 +174,13 @@ python main.py json --file file.json --max-concurrent 3 --max-rps 30
 
 ```bash
 # 测试JSON翻译
-python main.py json --file examples/translation_work.json --verbose
+uv run python main.py json --file examples/translation_work.json --verbose
 
 # 测试HTML翻译
-python main.py html --file examples/sample.html --verbose
+uv run python main.py html --file examples/sample.html --verbose
 
 # 测试HTTP服务器
-python main.py server --debug
+uv run python main.py server --debug
 ```
 
 #### 4.2 API测试
@@ -242,8 +243,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 #### 1. 依赖安装失败
 ```bash
 # 解决方案
-pip install --upgrade pip
-pip install -r requirements.txt
+uv sync --refresh --dev
 ```
 
 #### 2. API密钥错误
@@ -251,7 +251,7 @@ pip install -r requirements.txt
 # 验证密钥
 echo $ARK_API_KEY
 # 或者命令行指定
-python main.py json --file data.json --api-key YOUR_KEY
+uv run python main.py json --file data.json --api-key YOUR_KEY
 ```
 
 #### 3. 端口占用
@@ -259,7 +259,7 @@ python main.py json --file data.json --api-key YOUR_KEY
 # 检查端口占用
 lsof -i :8000
 # 使用其他端口
-python main.py server --port 8080
+uv run python main.py server --port 8080
 ```
 
 #### 4. 权限问题

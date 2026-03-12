@@ -12,45 +12,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 安装依赖
 ```bash
-pip install -r requirements.txt
+uv sync --dev
 ```
 
 ### 运行翻译任务
 
 #### JSON 文件翻译 (RenPy翻译专用)
 ```bash
-python main.py json --file <your_json_file_path>
+uv run python main.py json --file <your_json_file_path>
 ```
 
 #### HTML 文件翻译
 ```bash
-python main.py html --file <your_html_file_path> --output translated.html
+uv run python main.py html --file <your_html_file_path> --output translated.html
 ```
 
 #### ePub 电子书翻译
 ```bash
 # 单本翻译
-python main.py epub --file <your_epub_file_path> --output translated.epub
+uv run python main.py epub --file <your_epub_file_path> --output translated.epub
 
 # 批量翻译整个目录
-python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --auto-approve
+uv run python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --auto-approve
 ```
 
 #### Markdown 文件翻译
 ```bash
 # 基本用法
-python main.py md --file README.md --output README_zh.md
+uv run python main.py md --file README.md --output README_zh.md
 
 # 递归翻译目录
-python main.py md --file /path/to/md/folder --output /path/to/output/folder --recursive
+uv run python main.py md --file /path/to/md/folder --output /path/to/output/folder --recursive
 ```
 
 #### 启动 HTTP API 服务器
 ```bash
-python main.py server --port 8000
+uv run python main.py server --port 8000
 
 # 调试模式
-python main.py server --port 8000 --debug
+uv run python main.py server --port 8000 --debug
 ```
 
 ### 运行测试
@@ -58,20 +58,20 @@ python main.py server --port 8000 --debug
 #### 并发性能测试
 ```bash
 # 先启动服务器
-python main.py server --port 8000
+uv run python main.py server --port 8000
 
 # 在另一个终端运行测试
-python tests/test_concurrency.py
+uv run python tests/test_concurrency.py
 ```
 
 #### 使用 pytest 运行所有测试
 ```bash
-pytest tests/
+uv run pytest tests/
 ```
 
 #### 运行单个测试文件
 ```bash
-pytest tests/test_concurrency.py -v
+uv run pytest tests/test_concurrency.py -v
 ```
 
 ## 项目架构

@@ -125,7 +125,7 @@ git pull origin main
 
 ### 2. 启动服务器 (已经在运行)
 ```bash
-python main.py server --port 8000
+uv run python main.py server --port 8000
 ```
 
 启动日志会显示：

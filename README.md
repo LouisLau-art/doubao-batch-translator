@@ -25,7 +25,9 @@
 ```
 doubao-batch-translator/
 ├── main.py                    # 主入口文件
-├── requirements.txt           # 项目依赖
+├── pyproject.toml             # 项目依赖与元数据
+├── uv.lock                    # uv 锁文件
+├── .python-version            # Python 版本声明
 ├── README.md                  # 项目说明文档
 ├── models.json                # 模型配置
 ├── model_rate_limits.json     # 每模型 RPM 限速配置
@@ -81,8 +83,13 @@ doubao-batch-translator/
 git clone <repository-url>
 cd doubao-batch-translator
 
-# 安装依赖
-pip install -r requirements.txt
+# 如未安装 uv，请先参考官方安装说明：
+# https://docs.astral.sh/uv/getting-started/installation/
+
+# 项目默认使用 CERNET PyPI 镜像；如需覆盖，可自行设置 UV_DEFAULT_INDEX
+
+# 创建虚拟环境并安装依赖
+uv sync --dev
 ```
 
 ### 2. 配置API密钥
@@ -101,43 +108,43 @@ cp .env.example .env
 
 ```bash
 # 基本用法
-python main.py json --file <your_json_file_path>
+uv run python main.py json --file <your_json_file_path>
 ```
 
 #### HTML文件翻译
 
 ```bash
 # 基本用法 (默认翻译成中文)
-python main.py html --file <your_html_file_path> --output translated.html
+uv run python main.py html --file <your_html_file_path> --output translated.html
 ```
 
 #### ePub电子书翻译
 
 ```bash
 # 单本翻译 (默认翻译成中文)
-python main.py epub --file <your_epub_file_path> --output translated.epub
+uv run python main.py epub --file <your_epub_file_path> --output translated.epub
 
 # 批量翻译整个目录 (推荐)
-python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --auto-approve
+uv run python main.py epub --file /path/to/epub/folder/ --output /path/to/output/ --auto-approve
 ```
 
 #### Markdown文件翻译
 
 ```bash
 # 基本用法 (默认翻译成中文)
-python main.py md --file README.md --output README_zh.md
+uv run python main.py md --file README.md --output README_zh.md
 
 # 翻译整个目录下的Markdown文件
-python main.py md --file /path/to/md/folder --output /path/to/output/folder
+uv run python main.py md --file /path/to/md/folder --output /path/to/output/folder
 
 # 递归翻译目录下所有Markdown文件（包括子目录）
-python main.py md --file /path/to/md/folder --output /path/to/output/folder --recursive
+uv run python main.py md --file /path/to/md/folder --output /path/to/output/folder --recursive
 
 # 使用简写参数
-python main.py md -f /path/to/md/folder -o /path/to/output/folder -r
+uv run python main.py md -f /path/to/md/folder -o /path/to/output/folder -r
 
 # 翻译到其他语言
-python main.py md --file README.md --output README_en.md --target-lang en
+uv run python main.py md --file README.md --output README_en.md --target-lang en
 ```
 
 **特性**:
@@ -155,15 +162,15 @@ python main.py md --file README.md --output README_en.md --target-lang en
 
 ```bash
 # 步骤1: 批量翻译 (自动生成漏译报告和JSON，默认翻译成中文)
-python main.py epub --file /path/to/books/ --output /path/to/translated/ --auto-approve
+uv run python main.py epub --file /path/to/books/ --output /path/to/translated/ --auto-approve
 
 # 步骤2: (可选) 如果需要重新生成JSON
-python main.py generate-json --dir /path/to/translated/
+uv run python main.py generate-json --dir /path/to/translated/
 
 # 步骤3: 编辑 人工翻译.json，填写您的译文
 
 # 步骤4: 将人工译文回填到EPUB
-python main.py apply-fix --json /path/to/translated/人工翻译.json
+uv run python main.py apply-fix --json /path/to/translated/人工翻译.json
 ```
 
 **JSON 格式示例**:
@@ -190,24 +197,23 @@ python main.py apply-fix --json /path/to/translated/人工翻译.json
 
 ```bash
 # 导出运行时模型列表（JSON）
-python tools/export_ark_models.py --active-only --pretty --output ark_models.json
+uv run python tools/export_ark_models.py --active-only --pretty --output ark_models.json
 
 # 导出为 CSV，便于筛选和排序
-python tools/export_ark_models.py --format csv --output ark_models.csv
+uv run python tools/export_ark_models.py --format csv --output ark_models.csv
 
 # 仅看文本生成类模型
-python tools/export_ark_models.py --task-type TextGeneration --format md --output ark_models.md
+uv run python tools/export_ark_models.py --task-type TextGeneration --format md --output ark_models.md
 ```
 
 如果你要抓取「火山引擎控制台模型广场」里更细的参数（通常需要登录态）：
 
 ```bash
-# 首次使用需要安装 Playwright
-pip install playwright
-playwright install chromium
+# 首次使用按需拉起临时 Playwright 环境
+uv run --with playwright playwright install chromium
 
 # 打开浏览器并捕获模型广场相关 XHR/FETCH 返回
-python tools/capture_model_plaza_api.py --wait-seconds 90 --output-dir model_plaza_capture
+uv run --with playwright python tools/capture_model_plaza_api.py --wait-seconds 90 --output-dir model_plaza_capture
 ```
 
 脚本会输出：
@@ -219,10 +225,10 @@ python tools/capture_model_plaza_api.py --wait-seconds 90 --output-dir model_pla
 
 ```bash
 # 基本启动
-python main.py server --port 8000
+uv run python main.py server --port 8000
 
 # 调试模式
-python main.py server --port 8000 --debug
+uv run python main.py server --port 8000 --debug
 ```
 
 ### 5. 🌐 沉浸式翻译插件配置
@@ -232,7 +238,7 @@ python main.py server --port 8000 --debug
 #### 启动服务器
 
 ```bash
-python main.py server --port 8000
+uv run python main.py server --port 8000
 ```
 
 服务器启动后会监听 `http://0.0.0.0:8000`。
@@ -591,7 +597,7 @@ export ARK_API_KEY=your_api_key
 
 ```bash
 # 安装开发依赖
-pip install -r requirements.txt
+uv sync --dev
 ```
 
 ### 服务管理（Linux 系统）

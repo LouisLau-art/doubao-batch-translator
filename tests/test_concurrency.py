@@ -128,11 +128,11 @@ async def main():
         async with httpx.AsyncClient() as client:
             response = await client.get("http://localhost:8000/", timeout=5.0)
             if response.status_code != 200:
-                print("❌ 服务器未运行，请先启动: python main.py server --port 8000")
+                print("❌ 服务器未运行，请先启动: uv run python main.py server --port 8000")
                 return
     except Exception as e:
         print(f"❌ 无法连接到服务器: {e}")
-        print("请先启动服务器: python main.py server --port 8000")
+        print("请先启动服务器: uv run python main.py server --port 8000")
         return
     
     print("✅ 服务器连接正常\n")

@@ -33,13 +33,13 @@
 
 ```bash
 # 基础翻译
-python main.py epub --file input.epub --output translated.epub --target-lang zh
+uv run python main.py epub --file input.epub --output translated.epub --target-lang zh
 
 # 指定源语言
-python main.py epub --file input.epub --output translated.epub --source-lang en --target-lang zh
+uv run python main.py epub --file input.epub --output translated.epub --source-lang en --target-lang zh
 
 # 查看帮助
-python main.py epub --help
+uv run python main.py epub --help
 ```
 
 ### Python API
@@ -150,7 +150,7 @@ python test_epub_basic.py
 export ARK_API_KEY="your_api_key"
 
 # 执行完整翻译测试
-python main.py epub --file test_book.epub --output translated_test.epub --target-lang zh
+uv run python main.py epub --file test_book.epub --output translated_test.epub --target-lang zh
 ```
 
 ## 📋 文件清单
@@ -170,7 +170,7 @@ python main.py epub --file test_book.epub --output translated_test.epub --target
 
 ### 无需更改
 
-- `requirements.txt` - 无需新增依赖
+- `pyproject.toml` / `uv.lock` - 无需新增依赖
 - 核心翻译逻辑 - 完全复用现有架构
 
 ## 🎯 成功指标

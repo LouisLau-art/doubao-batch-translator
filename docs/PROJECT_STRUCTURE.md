@@ -8,7 +8,9 @@
 ```
 doubao-batch-translator/
 ├── main.py                    # 主入口文件
-├── requirements.txt           # 项目依赖
+├── pyproject.toml             # 项目依赖与元数据
+├── uv.lock                    # uv 锁文件
+├── .python-version            # Python 版本声明
 ├── README.md                  # 项目说明文档
 ├── .env.example               # 环境变量示例
 ├── .gitignore                 # Git忽略文件
@@ -60,7 +62,8 @@ doubao-batch-translator/
 
 ### 核心文件
 - **main.py**: 命令行工具主入口，支持JSON、HTML、ePub翻译和HTTP服务器
-- **requirements.txt**: Python依赖包列表
+- **pyproject.toml**: 项目元数据与依赖声明
+- **uv.lock**: 锁定后的可复现依赖版本
 - **README.md**: 详细的使用说明和配置指南
 
 ### 核心模块 (core/)
@@ -87,16 +90,16 @@ doubao-batch-translator/
 ### 命令行使用
 ```bash
 # JSON翻译
-python main.py json --file examples/translation_work.json
+uv run python main.py json --file examples/translation_work.json
 
 # HTML翻译
-python main.py html --file examples/sample.html --output translated.html
+uv run python main.py html --file examples/sample.html --output translated.html
 
 # ePub翻译
-python main.py epub --file epubs/original/en/book.epub --output translated.epub
+uv run python main.py epub --file epubs/original/en/book.epub --output translated.epub
 
 # 启动HTTP服务器
-python main.py server --port 8000
+uv run python main.py server --port 8000
 ```
 
 ### 环境配置
